@@ -206,6 +206,11 @@ Test: `NavMeshTests` gains a property test: for 10k random start/goal pairs agai
 forbidden regions, zero returned path vertices fall inside any forbidden polygon. This is the
 test that makes the spec 07 enforcement claim true rather than aspirational.
 
+Status: done — `CircleRegion`, `NavMesh.subtractForbidden` (inflated by the furniture
+clearance) and `addFragile`; `NavMeshBuilder.build(floors:obstacles:rules:)` applies rules last.
+10k-pair property test green, plus goal-inside-the-region and clamp cases; `fragile` excludes
+landing and gesturing only.
+
 ### B4 — Abstracted view to the server
 
 Modifies: `packages/AgentProtocol/schema/protocol.schema.json`, `AgentKit/AgentSession.swift`,

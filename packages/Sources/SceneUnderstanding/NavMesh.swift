@@ -1,5 +1,6 @@
 import AgentProtocol
 import Foundation
+import SpatialMemory
 import simd
 
 /// Walkable floor as a coarse occupancy grid, plus A* over it.
@@ -22,6 +23,14 @@ public struct NavMesh: Sendable {
     private var walkable: [Bool]
     /// Floor height per cell, so a path carries Y and the feet stay in contact.
     private var height: [Float]
+
+    /// Hard `forbidden` regions, kept after subtraction so `contains` questions can be
+    /// answered without re-deriving them from the grid.
+    public private(set) var forbiddenRegions: [CircleRegion] = []
+    /// `fragile` regions. These are *not* subtracted: the bird may path near them, it may
+    /// not land on them or gesture at them (spec 07 §Rules). Subtracting them would make a
+    /// coffee table with a vase on it into a wall.
+    public private(set) var fragileRegions: [CircleRegion] = []
 
     public init(origin: SIMD2<Float>, width: Int, depth: Int) {
         self.origin = origin
@@ -52,6 +61,38 @@ public struct NavMesh: Sendable {
         for index in cells(in: rect.expanded(by: Self.clearance)) {
             walkable[index] = false
         }
+    }
+
+    /// Subtracts a hard `forbidden` rule from the walkable surface.
+    ///
+    /// This is the only acceptable enforcement (spec 07 §Enforcement): a hard rule expressed
+    /// as a prompt instruction is a rule that gets violated on a bad sample, and one
+    /// violation of "don't touch this" costs the user's trust permanently. Once the cells are
+    /// gone, a model that decides to go there simply gets no path.
+    public mutating func subtractForbidden(_ region: CircleRegion) {
+        forbiddenRegions.append(region)
+        // Inflated by the same clearance as furniture: pathing along the exact edge of a
+        // forbidden region reads as pushing against it.
+        let inflated = region.expanded(by: Self.clearance)
+        for index in cells(in: inflated.boundingRect) where inflated.contains(worldXZ(index)) {
+            walkable[index] = false
+        }
+    }
+
+    /// Records a `fragile` region without touching the walkable surface.
+    public mutating func addFragile(_ region: CircleRegion) {
+        fragileRegions.append(region)
+    }
+
+    /// True when the point is inside any hard forbidden region. Nothing may be placed here
+    /// and no path may pass through it.
+    public func isForbidden(_ point: SIMD3<Float>) -> Bool {
+        forbiddenRegions.contains { $0.contains(SIMD2(point.x, point.z)) }
+    }
+
+    /// The bird may hop past a fragile region but never land on it or gesture at it.
+    public func allowsLanding(at point: SIMD3<Float>) -> Bool {
+        !isForbidden(point) && !fragileRegions.contains { $0.contains(SIMD2(point.x, point.z)) }
     }
 
     public func isWalkable(_ point: SIMD3<Float>) -> Bool {
@@ -198,6 +239,14 @@ public struct NavMesh: Sendable {
         return index(forCell: c)
     }
 
+    private func worldXZ(_ index: Int) -> SIMD2<Float> {
+        let c = cell(forIndex: index)
+        return SIMD2(
+            origin.x + (Float(c.x) + 0.5) * Self.cellSize,
+            origin.y + (Float(c.z) + 0.5) * Self.cellSize
+        )
+    }
+
     private func worldPosition(cell c: (x: Int, z: Int), y: Float) -> SIMD3<Float> {
         SIMD3(
             origin.x + (Float(c.x) + 0.5) * Self.cellSize,
@@ -244,10 +293,48 @@ public struct FloorRect: Sendable, Hashable {
     }
 }
 
+/// A taught rule's region on the floor plane. Circular because that is how radius is
+/// captured — from a surface extent, not from a drawn polygon (spec 07 §Capture).
+public struct CircleRegion: Sendable, Hashable {
+    public var center: SIMD2<Float>
+    public var radius: Float
+
+    public init(center: SIMD2<Float>, radius: Float) {
+        self.center = center
+        self.radius = max(0, radius)
+    }
+
+    public init(_ rule: Rule) {
+        self.init(center: SIMD2(rule.position.x, rule.position.z), radius: rule.radius)
+    }
+
+    public func contains(_ point: SIMD2<Float>) -> Bool {
+        simd_length(point - center) <= radius
+    }
+
+    public func expanded(by margin: Float) -> CircleRegion {
+        CircleRegion(center: center, radius: radius + margin)
+    }
+
+    var boundingRect: FloorRect {
+        FloorRect(
+            center: SIMD3(center.x, 0, center.y),
+            extent: SIMD2(radius * 2, radius * 2)
+        )
+    }
+}
+
 public enum NavMeshBuilder {
     /// Builds a grid sized to the union of the floor rects, with a one-metre border so
     /// `clamp` has room to search outward at the edges.
-    public static func build(floors: [FloorRect], obstacles: [FloorRect]) -> NavMesh? {
+    ///
+    /// Rules are applied last, after obstacles: a floor plane or an obstacle arriving later
+    /// in the list must not be able to re-open a region the user forbade.
+    public static func build(
+        floors: [FloorRect],
+        obstacles: [FloorRect],
+        rules: [Rule] = []
+    ) -> NavMesh? {
         guard !floors.isEmpty else { return nil }
         let minX = floors.map(\.minX).min()! - 1
         let maxX = floors.map(\.maxX).max()! + 1
@@ -260,6 +347,12 @@ public enum NavMeshBuilder {
         )
         for floor in floors { mesh.addFloor(rect: floor) }
         for obstacle in obstacles { mesh.subtractObstacle(rect: obstacle) }
+        for rule in rules where rule.kind == .forbidden && rule.severity == .hard {
+            mesh.subtractForbidden(CircleRegion(rule))
+        }
+        for rule in rules where rule.kind == .fragile {
+            mesh.addFragile(CircleRegion(rule))
+        }
         return mesh
     }
 }
