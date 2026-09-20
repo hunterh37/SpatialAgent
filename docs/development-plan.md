@@ -168,6 +168,11 @@ persistence keyed by room, individual deletion, and a complete wipe.
 Test: `SpatialMemoryTests` covers round-trip persistence, collision handling, deletion
 completeness including episodes, and that a wipe leaves no residue.
 
+Status: done — `SpatialMemory` target added: six record types, `AnchorRef`, collision-is-a-
+correction with identity preserved, deletion that reaches episodes, one-action wipe.
+`NamedPlaceStore` deleted and its stored places migrated on first load; `PlaceRecord` call
+sites moved to `Place`.
+
 ### B2 — Anchor binding
 
 New: `SpatialMemory/AnchorBinding.swift`. Modifies `SceneProvider.swift`.

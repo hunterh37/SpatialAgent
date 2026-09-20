@@ -26,6 +26,8 @@ targets:
       - package: SpatialAgentKit
         product: SceneUnderstanding
       - package: SpatialAgentKit
+        product: SpatialMemory
+      - package: SpatialAgentKit
         product: HomeBridge
       - package: SpatialAgentKit
         product: DesignSystem

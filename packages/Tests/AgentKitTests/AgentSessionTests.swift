@@ -3,6 +3,7 @@ import AgentTransport
 import CharacterKit
 import HomeBridge
 import SceneUnderstanding
+import SpatialMemory
 import XCTest
 import simd
 @testable import AgentKit
@@ -51,7 +52,7 @@ final class AgentSessionTests: XCTestCase {
         let session = AgentSession(
             channel: channel,
             home: home,
-            places: NamedPlaceStore(defaults: defaults)
+            places: MapStore(defaults: defaults)
         )
         session.connect(to: AgentEndpoint(name: "test", host: "127.0.0.1", port: 8787))
         return (session, channel)

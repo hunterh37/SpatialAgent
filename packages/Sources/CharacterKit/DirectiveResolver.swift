@@ -1,6 +1,7 @@
 import AgentProtocol
 import Foundation
 import SceneUnderstanding
+import SpatialMemory
 import simd
 
 /// Turns symbolic intent into something the renderer can execute.
@@ -35,7 +36,7 @@ public struct DirectiveResolver: Sendable {
         _ directive: CharacterDirective,
         characterPosition: SIMD3<Float>,
         userPosition: SIMD3<Float>,
-        places: [PlaceRecord],
+        places: [Place],
         devicePositions: [String: SIMD3<Float>],
         navMesh: NavMesh?
     ) -> ResolvedDirective {
@@ -109,8 +110,11 @@ public struct DirectiveResolver: Sendable {
         }
     }
 
-    private func lookup(_ name: String, in places: [PlaceRecord]) -> PlaceRecord? {
-        places.first { $0.id == name.lowercased() }
+    /// Case-insensitive exact match only. Fuzzy matching here would reintroduce guessing at
+    /// exactly the layer spec 07 forbids it: an unknown name becomes a question.
+    private func lookup(_ name: String, in places: [Place]) -> Place? {
+        let key = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return places.first { $0.nameKey == key }
     }
 }
 

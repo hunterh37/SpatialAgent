@@ -4,6 +4,7 @@ import AgentTransport
 import CharacterKit
 import HomeBridge
 import SceneUnderstanding
+import SpatialMemory
 import XCTest
 import simd
 
@@ -60,7 +61,7 @@ final class LiveAgentTests: XCTestCase {
     private func makeLiveSession(
         store: UserDefaults? = nil
     ) async throws -> (AgentSession, CharacterSpy, MockHomeProvider) {
-        let places = NamedPlaceStore(defaults: Self.scratchDefaults())
+        let places = MapStore(defaults: Self.scratchDefaults())
         for place in Self.apartmentPlaces { places.add(place) }
 
         let home = MockHomeProvider()
@@ -82,11 +83,11 @@ final class LiveAgentTests: XCTestCase {
 
     /// The same four places as `mocks/scenarios/apartment.yaml`, so both halves of the
     /// project are describing one imagined room.
-    private static let apartmentPlaces: [PlaceRecord] = [
-        PlaceRecord(name: "kitchen", position: SIMD3(2.4, 0, -1.8), radius: 0.9),
-        PlaceRecord(name: "desk", position: SIMD3(-1.6, 0, -2.2), radius: 0.6),
-        PlaceRecord(name: "couch", position: SIMD3(0.2, 0, 1.4), radius: 0.8),
-        PlaceRecord(name: "front door", position: SIMD3(-3.1, 0, 0.4), radius: 0.5),
+    private static let apartmentPlaces: [Place] = [
+        Place(name: "kitchen", position: SIMD3(2.4, 0, -1.8), radius: 0.9),
+        Place(name: "desk", position: SIMD3(-1.6, 0, -2.2), radius: 0.6),
+        Place(name: "couch", position: SIMD3(0.2, 0, 1.4), radius: 0.8),
+        Place(name: "front door", position: SIMD3(-3.1, 0, 0.4), radius: 0.5),
     ]
 
     private static func scratchDefaults() -> UserDefaults {

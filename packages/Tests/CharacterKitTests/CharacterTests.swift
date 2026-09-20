@@ -1,5 +1,6 @@
 import AgentProtocol
 import SceneUnderstanding
+import SpatialMemory
 import XCTest
 import simd
 @testable import CharacterKit
@@ -54,7 +55,7 @@ final class DirectiveResolverTests: XCTestCase {
         )!
     }
 
-    private let kitchen = PlaceRecord(name: "Kitchen", position: SIMD3(2, 0, -2))
+    private let kitchen = Place(name: "Kitchen", position: SIMD3(2, 0, -2))
 
     func testWalkToKnownPlaceProducesClampedPath() {
         let result = resolver.resolve(

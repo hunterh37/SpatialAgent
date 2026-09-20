@@ -5,6 +5,7 @@ import Combine
 import Foundation
 import HomeBridge
 import SceneUnderstanding
+import SpatialMemory
 import simd
 
 /// The one object the app talks to. Owns nothing spatial and renders nothing — it turns
@@ -41,7 +42,7 @@ public final class AgentSession: ObservableObject {
     @Published public private(set) var pendingConfirmations: [PendingConfirmation] = []
 
     public let confirmations = ConfirmationGate()
-    public let places: NamedPlaceStore
+    public let places: MapStore
 
     // MARK: Collaborators
 
@@ -71,11 +72,11 @@ public final class AgentSession: ObservableObject {
     public init(
         channel: AgentChannel? = nil,
         home: (any HomeProviding)? = nil,
-        places: NamedPlaceStore? = nil
+        places: MapStore? = nil
     ) {
         self.channel = channel ?? WebSocketAgentChannel()
         self.home = home ?? RemoteHomeProvider()
-        self.places = places ?? NamedPlaceStore()
+        self.places = places ?? MapStore()
 
         confirmations.$pending
             .receive(on: RunLoop.main)
