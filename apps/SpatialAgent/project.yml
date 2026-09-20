@@ -59,6 +59,10 @@ targets:
         NSWorldSensingUsageDescription: >-
           SpatialAgent uses the shape of your room so the character stands on the floor and
           walks around furniture.
+        # Hand tracking is the palm perch (spec/05-scene.md §Hands). Joints stay on device:
+        # the only thing derived from them is a landing point.
+        NSHandsTrackingUsageDescription: >-
+          SpatialAgent watches for an open palm so the character can fly to your hand.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.medvr.SpatialAgent

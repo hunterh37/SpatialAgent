@@ -70,11 +70,13 @@ forgets on restart, which is correct for now — coordinates stay off the server
 
 ---
 
-## 4. Deixis: devices have no positions — unchanged, still v0.3
+## 4. Deixis: devices have no positions — done (phase D4)
 
-Still open, and the recommendation stands: a device→place association resolved on the client,
-not a position on `Device`, so coordinates stay out of the server (docs/architecture.md §3b).
-`AgentSession` still passes `devicePositions: [:]`.
+Closed as recommended: the binding lives on the client as a taught `MapObject` carrying a
+`deviceId`, never as a position on `Device`, so coordinates stay out of the server
+(docs/architecture.md §3b). `AgentSession` builds `devicePositions` from the taught objects,
+and `DirectiveResolver.resolveDeixis` turns `deviceId: "that"` into a device through gaze plus
+the object table. A near-tie is a spoken question, not a best guess.
 
 ---
 

@@ -392,6 +392,10 @@ off the server, which is why the binding lives in `SpatialMemory` and not on `De
 Test: `DirectiveResolverTests` covers gaze-resolved device reference and the ambiguous case
 producing a question, not a guess.
 
+Status: done — `DirectiveResolver.resolveDeixis` plus `isDeictic`, `UnresolvedReason`
+gained `ambiguousReference` and `nothingReferenced` with spoken lines, `AgentSession` supplies
+taught objects and the held gaze point. Closes item 4 of `docs/middle-layer-todo.md`.
+
 ### D5 — Mood and affinity
 
 New: `Bird/Mood.swift`.

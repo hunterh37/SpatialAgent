@@ -271,14 +271,29 @@ public final class AgentSession: ObservableObject {
         }
     }
 
+    /// Taught objects that carry a device binding, as a device-id lookup.
+    private func devicePositions() -> [String: SIMD3<Float>] {
+        var out: [String: SIMD3<Float>] = [:]
+        for object in places.map.objects {
+            guard let id = object.deviceId, object.isNavigable else { continue }
+            out[id] = object.position
+        }
+        return out
+    }
+
     private func apply(_ directive: CharacterDirective) {
         let resolved = resolver.resolve(
             directive,
             characterPosition: characterPosition,
             userPosition: scene?.userPosition ?? .zero,
             places: places.places,
-            devicePositions: [:],   // populated in v0.3 (deixis); see docs/middle-layer-todo.md
-            navMesh: scene?.navMesh
+            // Device positions come from taught objects: the binding between a thing in the
+            // room and a device id is user data on the client, never anything the server
+            // sent (spec 07 §Learned behavior).
+            devicePositions: devicePositions(),
+            navMesh: scene?.navMesh,
+            objects: places.map.objects,
+            gaze: gaze?.target()?.point
         )
         lastResolved = resolved
         if case let .unresolved(reason) = resolved {

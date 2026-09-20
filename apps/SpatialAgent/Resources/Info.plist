@@ -29,6 +29,8 @@
 	<array>
 		<string>_spatialagent._tcp</string>
 	</array>
+	<key>NSHandsTrackingUsageDescription</key>
+	<string>SpatialAgent watches for an open palm so the character can fly to your hand.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>SpatialAgent connects to the Mac on your network that runs the model. Nothing about your home leaves the LAN.</string>
 	<key>NSMicrophoneUsageDescription</key>
