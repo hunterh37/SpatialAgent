@@ -46,6 +46,7 @@ async def run(
     auto_confirm: bool,
     script: list[str],
     resume: str | None = None,
+    timeout: float = 120.0,
 ) -> int:
     home = MockHome(scenario.devices)
     scene = scenario.scene
@@ -79,6 +80,7 @@ async def run(
 
         pending: list[str] = list(script)
         speaking = False
+        turn_done = asyncio.Event()
 
         async def pump() -> None:
             nonlocal speaking, session_id
@@ -108,6 +110,7 @@ async def run(
                     if speaking:
                         print()
                     speaking = False
+                    turn_done.set()
                     print()
 
                 elif kind == "characterDirective":
@@ -166,6 +169,7 @@ async def run(
 
                 elif kind == "error":
                     print(f"\n  {RED}[error]{RESET} {event['code']}: {event['message']}")
+                    turn_done.set()
 
         pump_task = asyncio.create_task(pump())
 
@@ -176,7 +180,6 @@ async def run(
                     print(f"{BOLD}you:{RESET} {text}")
                 else:
                     if script:
-                        await asyncio.sleep(0.5)
                         break
                     text = await asyncio.to_thread(input, f"{BOLD}you:{RESET} ")
                     if text.strip() in {"", "quit", "exit", "/quit"}:
@@ -200,10 +203,17 @@ async def run(
                         print(f"  {DIM}named '{name}'{RESET}")
                         continue
 
+                turn_done.clear()
                 await ws.send(json.dumps({
                     "type": "userUtterance", "id": uuid.uuid4().hex[:8], "text": text,
                 }))
-                await asyncio.sleep(0.3 if pending else 0.0)
+                if script:
+                    # Wait for the turn rather than guessing: a cold local model can take
+                    # tens of seconds to load before the first token.
+                    try:
+                        await asyncio.wait_for(turn_done.wait(), timeout)
+                    except TimeoutError:
+                        print(f"\n  {RED}[timeout]{RESET} no utteranceEnd within {timeout}s")
         except (KeyboardInterrupt, EOFError):
             pass
         finally:
@@ -225,6 +235,8 @@ def main() -> int:
                         help="scripted utterance; repeatable, exits when done")
     parser.add_argument("--yes", action="store_true", help="auto-confirm unsafe tools")
     parser.add_argument("--resume", help="sessionId from an earlier run; resumes the transcript")
+    parser.add_argument("--timeout", type=float, default=120.0,
+                        help="seconds a scripted turn waits for utteranceEnd")
     parser.add_argument("--list-scenarios", action="store_true")
     args = parser.parse_args()
 
@@ -233,7 +245,9 @@ def main() -> int:
         return 0
 
     scenario = Scenario.load(args.scenario)
-    return asyncio.run(run(args.url, scenario, args.yes, args.say, args.resume))
+    return asyncio.run(
+        run(args.url, scenario, args.yes, args.say, args.resume, args.timeout)
+    )
 
 
 if __name__ == "__main__":

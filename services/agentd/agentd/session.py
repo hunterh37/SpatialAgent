@@ -32,6 +32,7 @@ from .protocol import (
     ToolResult,
     UtteranceEnd,
 )
+from .thinking import ThinkingFilter
 from .tools import ASK_FOR_PLACE, ToolRegistry
 
 MAX_TURNS = 40
@@ -134,11 +135,14 @@ class Session:
         for _ in range(MAX_TOOL_ROUNDS):
             calls: list[tuple[str, str, dict[str, Any]]] = []
             buffer: list[str] = []
+            # A reasoning model's scratchpad is not speech (agentd/thinking.py).
+            thinking = ThinkingFilter()
 
             async for chunk in self.adapter.stream(self._messages(), self.tools.schemas()):
-                if chunk.text:
-                    buffer.append(chunk.text)
-                    yield Token(utteranceId=utterance_id, text=chunk.text)
+                spoken = thinking.feed(chunk.text) if chunk.text else ""
+                if spoken:
+                    buffer.append(spoken)
+                    yield Token(utteranceId=utterance_id, text=spoken)
 
                     # Walk as soon as a known place is mentioned, rather than after the
                     # sentence completes. Motion overlapping speech is what reads as alive.
@@ -153,6 +157,11 @@ class Session:
                         (uuid.uuid4().hex[:12], fn.get("name", ""), _as_dict(fn.get("arguments")))
                     )
 
+            tail = thinking.flush()
+            if tail:
+                buffer.append(tail)
+                yield Token(utteranceId=utterance_id, text=tail)
+
             reply = "".join(buffer).strip()
             if reply:
                 self.history.append({"role": "assistant", "content": reply})
@@ -161,14 +170,18 @@ class Session:
                 break
 
             for call_id, name, args in calls:
-                async for event in self._dispatch(call_id, name, args):
+                async for event in self._dispatch(call_id, name, args, emitted_places):
                     yield event
 
         yield UtteranceEnd(utteranceId=utterance_id)
         yield Directive(directive=CharacterDirective(kind="idle"))
 
     async def _dispatch(
-        self, call_id: str, name: str, args: dict[str, Any]
+        self,
+        call_id: str,
+        name: str,
+        args: dict[str, Any],
+        emitted_places: set[str] | None = None,
     ) -> AsyncIterator[ServerEvent]:
         """One tool call: announce it, get it fulfilled, write the result into history."""
         if name == ASK_FOR_PLACE:
@@ -177,6 +190,20 @@ class Session:
             return
 
         safety = self.tools.safety_of(name)
+        # Coerce before announcing: the client sees exactly the arguments that will run.
+        args = self.tools.coerce(name, args)
+
+        # A small model often acts without narrating the walk, so the character would stand
+        # still while the lights change across the room. The device's own room is a place
+        # the client already told us about, so this cannot invent a destination.
+        place = self._place_for_device(args.get("device_id"))
+        if place and (emitted_places is None or place not in emitted_places):
+            if emitted_places is not None:
+                emitted_places.add(place)
+            yield Directive(
+                directive=CharacterDirective(kind="walkTo", place=place, target="place")
+            )
+
         self._pending_names[call_id] = name
         yield ToolCall(
             callId=call_id,
@@ -224,6 +251,18 @@ class Session:
         content = outcome.payload if outcome.ok else {"error": outcome.error or "failed"}
         self.history.append({"role": "tool", "name": name, "content": _compact(content)})
         self._trim()
+
+    def _place_for_device(self, device_id: Any) -> str | None:
+        """Device -> named place, resolved by room name only. Coordinates stay off the
+        server (docs/architecture.md 3b)."""
+        if not isinstance(device_id, str):
+            return None
+        device = next((d for d in self.devices if d.id == device_id), None)
+        if device is None or not device.room:
+            return None
+        return next(
+            (p.name for p in self.scene.places if p.name.lower() == device.room.lower()), None
+        )
 
     def _merge_device(self, payload: dict[str, Any]) -> None:
         """Keep the prompt honest: a tool that changed a device updates our snapshot."""

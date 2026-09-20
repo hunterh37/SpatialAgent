@@ -20,6 +20,7 @@ let package = Package(
         .library(name: "HomeBridge", targets: ["HomeBridge"]),
         .library(name: "DesignSystem", targets: ["DesignSystem"]),
         .library(name: "AgentKit", targets: ["AgentKit"]),
+        .library(name: "VoiceInput", targets: ["VoiceInput"]),
     ],
     targets: [
         .target(name: "AgentProtocol", swiftSettings: swift5),
@@ -36,6 +37,7 @@ let package = Package(
         ),
         .target(name: "HomeBridge", dependencies: ["AgentProtocol"], swiftSettings: swift5),
         .target(name: "DesignSystem", swiftSettings: swift5),
+        .target(name: "VoiceInput", swiftSettings: swift5),
         .target(
             name: "AgentKit",
             dependencies: [

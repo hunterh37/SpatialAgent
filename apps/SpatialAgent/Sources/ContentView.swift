@@ -3,6 +3,7 @@ import AgentTransport
 import DesignSystem
 import HomeBridge
 import SwiftUI
+import VoiceInput
 
 /// The 2D control surface: connection, the transcript, and the text field that stands in for
 /// speech until v0.2. The character itself lives in the immersive space.
@@ -12,6 +13,7 @@ struct ContentView: View {
     @Environment(\.openImmersiveSpace) private var openSpace
     @Environment(\.dismissImmersiveSpace) private var dismissSpace
 
+    @StateObject private var voice = SpeechCapture()
     @State private var draft = ""
     @State private var manualHost = ""
     @FocusState private var fieldFocused: Bool
@@ -25,6 +27,21 @@ struct ContentView: View {
         }
         .padding(24)
         .task { await model.start() }
+        .task {
+            // Dictation drives the same path as the text field: partials keep the server
+            // current, the final transcript is the utterance.
+            voice.onPartial = { text in
+                draft = text
+                session.send(partial: text)
+            }
+            voice.onFinal = { text in
+                draft = text
+                send()
+            }
+        }
+        .onChange(of: voice.isListening) { _, listening in
+            if listening { session.addressed() }
+        }
         .onChange(of: fieldFocused) { _, focused in
             // Focus is the v0.1 stand-in for gaze acquisition: the character shows it is
             // being addressed before the utterance ends (spec/02-interaction.md).
@@ -43,7 +60,7 @@ struct ContentView: View {
             Toggle("In the room", isOn: spaceBinding).toggleStyle(.button)
         }
         .overlay(alignment: .bottomLeading) {
-            if let problem = model.placementProblem {
+            if let problem = model.placementProblem ?? voiceProblem {
                 Text(problem).font(.caption).foregroundStyle(.orange).offset(y: 22)
             }
         }
@@ -98,6 +115,7 @@ struct ContentView: View {
 
     private var composer: some View {
         HStack(spacing: 10) {
+            micButton
             TextField("Ask it to do something", text: $draft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .focused($fieldFocused)
@@ -107,6 +125,27 @@ struct ContentView: View {
                 .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .padding(.top, 14)
+    }
+
+    /// Push-to-talk. Held state is explicit rather than voice-activated: an always-open mic
+    /// in a room with other people is a different product.
+    private var micButton: some View {
+        Button {
+            Task { await voice.toggle() }
+        } label: {
+            Image(systemName: voice.isListening ? "mic.fill" : "mic")
+                .symbolEffect(.variableColor, isActive: voice.isListening)
+        }
+        .buttonStyle(.bordered)
+        .tint(voice.isListening ? .red : nil)
+        .help(voiceProblem ?? "Dictate")
+    }
+
+    private var voiceProblem: String? {
+        switch voice.status {
+        case let .denied(reason), let .failed(reason): return reason
+        default: return nil
+        }
     }
 
     @ViewBuilder

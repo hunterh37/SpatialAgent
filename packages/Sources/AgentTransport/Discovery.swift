@@ -51,6 +51,11 @@ public final class AgentDiscovery: ObservableObject {
     public init() {}
 
     public func start() {
+        // The simulator runs on the Mac, so `agentd` on localhost is reachable there and is
+        // the fastest path to a live loop before a headset is on the network.
+        #if targetEnvironment(simulator)
+        _ = addManual(host: "127.0.0.1")
+        #endif
         guard browser == nil else { return }
         let params = NWParameters()
         params.includePeerToPeer = false

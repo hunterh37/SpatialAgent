@@ -89,20 +89,31 @@ public final class CharacterEntity {
         return nil
     }
 
+    /// Red capsule stand-in driven by the agent loop while the rig is in flight.
     private static func placeholder() -> Entity {
-        let body = ModelEntity(
-            mesh: .generateBox(size: SIMD3(0.16, 0.34, 0.16), cornerRadius: 0.07),
-            materials: [SimpleMaterial(color: .init(white: 0.85, alpha: 1), isMetallic: false)]
+        let height: Float = 0.34
+        let radius: Float = 0.08
+        // `MeshResource.generateCapsule` is not in every SDK this package builds against;
+        // a fully rounded box reads as a capsule at 45cm.
+        let mesh = MeshResource.generateBox(
+            size: SIMD3(radius * 2, height, radius * 2),
+            cornerRadius: radius
         )
-        body.position.y = 0.17
-        let head = ModelEntity(
-            mesh: .generateSphere(radius: 0.09),
-            materials: [SimpleMaterial(color: .init(white: 0.95, alpha: 1), isMetallic: false)]
+        var material = PhysicallyBasedMaterial()
+        material.baseColor = .init(tint: .red)
+        material.roughness = 0.35
+        material.metallic = 0.0
+        material.emissiveColor = .init(color: .red)
+        material.emissiveIntensity = 0.25
+        let body = ModelEntity(mesh: mesh, materials: [material])
+        body.position.y = height / 2 + radius
+        // Tap target for addressing; the capsule has no rig to hit-test against.
+        body.components.set(InputTargetComponent())
+        body.components.set(
+            CollisionComponent(shapes: [.generateCapsule(height: height + radius * 2, radius: radius)])
         )
-        head.position.y = 0.4
         let wrapper = Entity()
         wrapper.addChild(body)
-        wrapper.addChild(head)
         return wrapper
     }
 

@@ -23,7 +23,11 @@ class Tool:
     parameters: dict[str, Any] = field(default_factory=dict)
 
     def as_schema(self) -> dict[str, Any]:
-        """OpenAI/Ollama-compatible function definition."""
+        """OpenAI/Ollama-compatible function definition.
+
+        `required` is declared per parameter here for readability, but JSON Schema puts it
+        on the object as a list of names. Leaving it inside a property is a 400 from Ollama.
+        """
         return {
             "type": "function",
             "function": {
@@ -31,11 +35,49 @@ class Tool:
                 "description": self.description,
                 "parameters": {
                     "type": "object",
-                    "properties": self.parameters,
+                    "properties": {
+                        key: {k: v for k, v in spec.items() if k != "required"}
+                        for key, spec in self.parameters.items()
+                    },
                     "required": [k for k, v in self.parameters.items() if v.get("required")],
                 },
             },
         }
+
+
+_TRUE = {"true", "yes", "on", "1"}
+_FALSE = {"false", "no", "off", "0"}
+
+
+def coerce_value(value: Any, declared: str) -> Any:
+    """A small model emits `"false"`, not `false`. `bool("false")` is True, which silently
+    does the opposite of what the user asked, so arguments are coerced to the type the tool
+    declared before anything executes."""
+    if declared == "boolean":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in _TRUE:
+                return True
+            if lowered in _FALSE:
+                return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return value
+    if declared == "integer":
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return value
+    if declared == "number":
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return value
+    if declared == "string" and not isinstance(value, str):
+        return str(value)
+    return value
 
 
 class ToolRegistry:
@@ -55,6 +97,16 @@ class ToolRegistry:
 
     def names(self) -> list[str]:
         return list(self._tools)
+
+    def coerce(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        """Arguments as the tool declared them. Unknown tools and extra keys pass through."""
+        tool = self._tools.get(name)
+        if tool is None:
+            return args
+        return {
+            key: coerce_value(value, tool.parameters.get(key, {}).get("type", ""))
+            for key, value in args.items()
+        }
 
     def schemas(self) -> list[dict[str, Any]]:
         return [t.as_schema() for t in self._tools.values()]

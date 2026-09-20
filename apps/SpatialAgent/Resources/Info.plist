@@ -31,6 +31,10 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>SpatialAgent connects to the Mac on your network that runs the model. Nothing about your home leaves the LAN.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>SpatialAgent listens when you hold the mic button so you can speak to the character. Audio is transcribed on device.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Speech is transcribed on device so the character can act on what you say.</string>
 	<key>NSWorldSensingUsageDescription</key>
 	<string>SpatialAgent uses the shape of your room so the character stands on the floor and walks around furniture.</string>
 	<key>UIApplicationSceneManifest</key>

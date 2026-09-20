@@ -38,6 +38,11 @@ from .tools import default_registry
 log = logging.getLogger("agentd")
 
 
+# Small enough to sit in memory on a laptop and still call tools reliably. Anything
+# smaller stops emitting well-formed tool calls, which is the floor for this project.
+DEFAULT_MODEL = "llama3.2:3b"
+
+
 def build_adapter() -> ModelAdapter:
     backend = os.environ.get("AGENTD_BACKEND", "ollama")
     if backend == "echo":
@@ -49,7 +54,7 @@ def build_adapter() -> ModelAdapter:
             api_key=os.environ.get("OPENAI_API_KEY", "not-needed"),
         )
     return OllamaAdapter(
-        model=os.environ.get("AGENTD_MODEL", "llama3.2"),
+        model=os.environ.get("AGENTD_MODEL", DEFAULT_MODEL),
         base_url=os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434"),
     )
 

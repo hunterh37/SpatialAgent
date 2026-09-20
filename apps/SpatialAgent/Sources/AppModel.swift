@@ -40,6 +40,9 @@ final class AppModel {
 
     func start() async {
         discovery.start()
+        #if targetEnvironment(simulator)
+        connectToFirstAvailable()
+        #endif
         await scene.start()
     }
 

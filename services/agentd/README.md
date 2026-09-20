@@ -15,8 +15,9 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 AGENTD_BACKEND=echo .venv/bin/python -m agentd --port 8787
 
 # real local model, via Ollama
-ollama serve && ollama pull llama3.2
-AGENTD_MODEL=llama3.2 .venv/bin/python -m agentd --port 8787
+brew install ollama && brew services start ollama
+ollama pull llama3.2:3b
+.venv/bin/python -m agentd --port 8787
 
 # real local model, via anything OpenAI-compatible (llama.cpp server, LM Studio, vLLM)
 AGENTD_BACKEND=lmstudio AGENTD_MODEL=qwen2.5-7b-instruct .venv/bin/python -m agentd
@@ -43,6 +44,22 @@ confirmation unless `--yes` is passed.
 
 At the prompt: `/devices` lists state, `/ring` fires the doorbell (an ambient event with
 nobody having said anything), `/place NAME` names a place, `/quit` exits.
+
+## Local models worth using
+
+Tool calling is the floor: a model that cannot emit a well-formed call cannot control
+anything. These are verified against this agent loop on an M2 Pro.
+
+| Model | Size | Notes |
+|---|---|---|
+| `llama3.2:3b` | 2.0 GB | the default; reliable tool calls, answers in about a second |
+| `qwen3:1.7b` | 1.4 GB | cheapest that still calls tools; emits reasoning, which is stripped |
+| `echo` backend | 0 | no model at all, for CI and for working on the loop itself |
+
+Two things a small model gets wrong that the middle layer now absorbs: it emits `"false"`
+as a string, which `bool()` would read as True, so arguments are coerced to the declared
+type before anything executes; and a reasoning model inlines `<think>` blocks, which are
+filtered out of the token stream so the character never speaks its own scratchpad.
 
 ## Who executes a tool
 
@@ -89,7 +106,7 @@ mocks/                  fake headset, scenario fixtures, mock smart home
 | Var | Default | |
 |---|---|---|
 | `AGENTD_BACKEND` | `ollama` | `echo`, `ollama`, or `lmstudio`/`llamacpp`/`vllm`/`openai` |
-| `AGENTD_MODEL` | `llama3.2` | |
+| `AGENTD_MODEL` | `llama3.2:3b` | or `--model`; see the table below |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | |
 | `OPENAI_BASE_URL` | `http://127.0.0.1:1234/v1` | for the OpenAI-compatible backend |
 | `AGENTD_HOME` | `client` | `mock` executes tools here instead of on the headset |

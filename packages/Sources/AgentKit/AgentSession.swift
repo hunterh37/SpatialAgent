@@ -46,6 +46,8 @@ public final class AgentSession: ObservableObject {
 
     private var pumpTask: Task<Void, Never>?
     private var pendingUtteranceId: String?
+    /// Id shared by the partial transcripts of the utterance currently being spoken.
+    private var pendingPartialId: String?
     private var lastSceneSent: Date = .distantPast
     private var directiveSink: ((ResolvedDirective) -> Void)?
     private var signalSink: ((CharacterEvent) -> Void)?
@@ -109,7 +111,10 @@ public final class AgentSession: ObservableObject {
     public func send(utterance text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let id = UUID().uuidString
+        // A dictated utterance keeps the id its partials used, so the server sees one
+        // utterance growing rather than two.
+        let id = pendingPartialId ?? UUID().uuidString
+        pendingPartialId = nil
         pendingUtteranceId = id
         transcript.append(TranscriptEntry(role: .user, text: trimmed))
         currentReply = ""
@@ -119,6 +124,16 @@ public final class AgentSession: ObservableObject {
         // the model responds: the character enters `thinking` on send.
         signal(.utteranceEnded)
         Task { await channel.send(.userUtterance(id: id, text: trimmed, isFinal: true)) }
+    }
+
+    /// Streams a partial speech transcript. The character is already listening; this only
+    /// keeps the server's view of the sentence current, so it is never final and never
+    /// enters the transcript.
+    public func send(partial text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, capabilities.speechInput else { return }
+        let id = pendingPartialId ?? { let new = UUID().uuidString; pendingPartialId = new; return new }()
+        Task { await channel.send(.userUtterance(id: id, text: trimmed, isFinal: false)) }
     }
 
     /// Called when the user's gaze lands on the character, or the field takes focus.

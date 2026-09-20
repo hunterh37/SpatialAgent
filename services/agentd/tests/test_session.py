@@ -283,3 +283,75 @@ async def test_first_device_snapshot_is_not_ambient() -> None:
     scenario = Scenario.load("apartment")
     session = Session(EchoAdapter(), default_registry())
     assert session.update_devices(scenario.devices) == []
+
+
+async def test_reasoning_traces_are_never_spoken() -> None:
+    adapter = EchoAdapter(scripted=[
+        Chunk(text="<think>the kitchen "), Chunk(text="light is on</think>"),
+        Chunk(text="Turning it off."), Chunk(done=True),
+    ])
+    session = Session(adapter, default_registry())
+    events = await _collect(session, "kitchen light off")
+    spoken = "".join(e.text for e in events if isinstance(e, Token))
+    assert spoken == "Turning it off."
+    assert "think" not in session.history[-1]["content"]
+
+
+async def test_acting_on_a_device_walks_to_its_room() -> None:
+    """A 3B model acts without narrating the walk; the character should still move."""
+    scenario = Scenario.load("apartment")
+    home = MockHome(scenario.devices)
+    adapter = EchoAdapter(scripted=[
+        Chunk(tool_calls=[{"function": {"name": "set_light", "arguments": {
+            "device_id": "light.kitchen", "on": False}}}]),
+        Chunk(done=True),
+    ])
+    session = Session(adapter, default_registry(), ServerExecutor(home, timeout=1.0))
+    session.update_scene(scenario.scene)
+    session.update_devices([d.model_copy(deep=True) for d in scenario.devices])
+
+    events = await _collect(session, "kitchen light off")
+    walks = [e for e in events if isinstance(e, Directive) and e.directive.kind == "walkTo"]
+    assert [w.directive.place for w in walks] == ["kitchen"]
+    # The walk is announced before the call it belongs to.
+    assert events.index(walks[0]) < next(
+        i for i, e in enumerate(events) if isinstance(e, ToolCall)
+    )
+
+
+async def test_device_in_a_room_with_no_named_place_does_not_walk() -> None:
+    """light.desk lives in room 'office', which the apartment fixture never names."""
+    scenario = Scenario.load("apartment")
+    home = MockHome(scenario.devices)
+    adapter = EchoAdapter(scripted=[
+        Chunk(tool_calls=[{"function": {"name": "set_light", "arguments": {
+            "device_id": "light.desk", "on": True}}}]),
+        Chunk(done=True),
+    ])
+    session = Session(adapter, default_registry(), ServerExecutor(home, timeout=1.0))
+    session.update_scene(scenario.scene)
+    session.update_devices([d.model_copy(deep=True) for d in scenario.devices])
+
+    events = await _collect(session, "desk lamp on")
+    assert not [e for e in events if isinstance(e, Directive) and e.directive.kind == "walkTo"]
+
+
+async def test_the_walk_is_not_repeated_for_a_second_call_in_the_same_room() -> None:
+    scenario = Scenario.load("apartment")
+    home = MockHome(scenario.devices)
+    adapter = EchoAdapter(scripted=[
+        Chunk(tool_calls=[
+            {"function": {"name": "set_light", "arguments": {
+                "device_id": "light.kitchen", "on": False}}},
+            {"function": {"name": "get_device_state", "arguments": {
+                "device_id": "light.kitchen"}}},
+        ]),
+        Chunk(done=True),
+    ])
+    session = Session(adapter, default_registry(), ServerExecutor(home, timeout=1.0))
+    session.update_scene(scenario.scene)
+    session.update_devices([d.model_copy(deep=True) for d in scenario.devices])
+
+    events = await _collect(session, "kitchen light off then check it")
+    walks = [e for e in events if isinstance(e, Directive) and e.directive.kind == "walkTo"]
+    assert len(walks) == 1
