@@ -375,6 +375,12 @@ Test: `CuriosityPlannerTests` asserts every budget clause independently, includi
 two-ignores stop. The budget is a product requirement (PRD §9), so each clause gets its own
 test rather than one combined one.
 
+Status: done — `CuriosityPlanner` holds every clause (10-minute gap, 4 per session, 30s after
+an utterance, quiet rules, never twice, 7-day suppression, stop after two ignores) and is
+codable so never-twice and suppression survive a relaunch; candidate generation covers unbound
+devices, activity-less places and unnamed regions. `agentd/ambient.py` gained the matching
+30s utterance-quiet window, which a doorbell is exempt from.
+
 ### D4 — Deixis
 
 Modifies: `CharacterKit/DirectiveResolver.swift`, `AgentKit/AgentSession.swift`.

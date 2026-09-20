@@ -59,3 +59,32 @@ def test_diff_reports_only_what_changed() -> None:
 def test_diff_of_identical_snapshots_is_empty() -> None:
     devices = Scenario.load("apartment").devices
     assert diff_devices(devices, [d.model_copy(deep=True) for d in devices]) == []
+
+
+# --- the utterance quiet window (spec/07-memory.md Curiosity) ---------------------------
+
+
+def test_nothing_unprompted_within_30s_of_the_user_speaking() -> None:
+    clock = [1000.0]
+    bus = AmbientBus(clock=lambda: clock[0])
+    bus.note_utterance()
+
+    clock[0] += 5
+    assert bus.offer("light.kitchen", "stateChange", "Kitchen light: on.") is None
+
+    clock[0] += 30
+    assert bus.offer("light.kitchen", "stateChange", "Kitchen light: on.") is not None
+
+
+def test_a_doorbell_does_not_wait_for_the_quiet_window() -> None:
+    clock = [1000.0]
+    bus = AmbientBus(clock=lambda: clock[0])
+    bus.note_utterance()
+    clock[0] += 1
+    assert bus.offer("sensor.doorbell", "doorbell", "Someone is at the door.") is not None
+
+
+def test_the_quiet_window_is_not_armed_before_anyone_speaks() -> None:
+    bus = AmbientBus()
+    assert not bus.in_utterance_quiet()
+    assert bus.offer("light.kitchen", "stateChange", "Kitchen light: on.") is not None

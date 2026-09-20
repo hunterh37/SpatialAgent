@@ -26,6 +26,9 @@ public final class CharacterEntity {
     /// Locomotion, motion core, face, attention and idle. Each is a value type with its own
     /// tests; this class owns the wiring and nothing else.
     public private(set) var hop = HopController()
+    /// Flight to an offered palm. Owns the transform whenever it is engaged; `hop` owns it
+    /// otherwise, and the two never drive the root on the same frame.
+    public private(set) var perch = PerchController()
     public private(set) var animator = BirdAnimator()
     public internal(set) var face = FaceController()
     public private(set) var attention = AttentionController()
@@ -65,6 +68,7 @@ public final class CharacterEntity {
 
     public func place(at pose: Placement.Pose) {
         position = pose.position
+        perch.cancel(at: pose.position, yaw: pose.yaw)
         hop.place(at: pose.position, yaw: pose.yaw)
         root.position = pose.position
         root.orientation = simd_quatf(angle: pose.yaw, axis: SIMD3(0, 1, 0))
@@ -166,6 +170,39 @@ public final class CharacterEntity {
         FaceParameters.distance(face.expressionParameters, Expression.neutral.parameters) > 0.02
     }
 
+    // MARK: - Hand perch (spec 05 §Hands)
+
+    /// The palm currently being offered, or nil. Called every frame from the hand tracker.
+    ///
+    /// Idempotent: passing the same palm repeatedly retargets the existing flight rather
+    /// than restarting it, so a hand that drifts while the bird is inbound is followed
+    /// instead of causing a stutter of fresh takeoffs.
+    public func offerPalm(_ palm: PalmPose?) {
+        guard let palm else {
+            if perch.isEngaged { perch.release() }
+            return
+        }
+        if perch.isEngaged {
+            perch.retarget(palm)
+            return
+        }
+        // A palm is an invitation, not a command: an unreachable one is ignored silently
+        // rather than sending the bird across the room.
+        guard perch.canAccept(palm, from: position) else { return }
+        hop.stop()
+        if let event = perch.offer(palm, currentPosition: position, currentYaw: hop.yaw),
+           event == .tookOff {
+            idle.interrupt()
+            face.set(.alert)
+        }
+    }
+
+    /// True while the character is standing on a hand.
+    public var isPerchedOnHand: Bool { perch.isPerched }
+
+    /// Yaw actually applied to the body this frame, whichever controller owns it.
+    public var bodyYaw: Float { perch.isEngaged ? perch.yaw : hop.yaw }
+
     // MARK: - Per-frame update
 
     /// Called from a `SceneEvents.Update` subscription. Keeps all motion in one place so the
@@ -177,10 +214,34 @@ public final class CharacterEntity {
         userSilence += deltaTime
         animator.update(deltaTime: deltaTime)
         face.update(deltaTime: deltaTime)
-        advanceLocomotion(deltaTime: deltaTime)
+        advancePerch(deltaTime: deltaTime)
+        if !perch.isEngaged { advanceLocomotion(deltaTime: deltaTime) }
         advanceAttention(deltaTime: deltaTime, userPosition: userPosition)
         advanceIdle(deltaTime: deltaTime)
         writeToRig()
+    }
+
+    private func advancePerch(deltaTime: Float) {
+        guard perch.isEngaged else { return }
+        for event in perch.update(deltaTime: deltaTime) {
+            switch event {
+            case .tookOff, .offerRejected:
+                break
+            case .landedOnHand:
+                animator.land()
+                face.set(.happy)
+            case .leftHand:
+                face.set(.neutral)
+            case .landedOnFloor:
+                animator.land()
+                face.set(.neutral)
+                // Hand back to the ground controller at exactly the pose it landed in, so
+                // the next hop starts from where the body actually is.
+                hop.place(at: perch.position, yaw: perch.yaw)
+                signal(.settled)
+            }
+        }
+        position = perch.position
     }
 
     private func advanceLocomotion(deltaTime: Float) {
@@ -204,18 +265,19 @@ public final class CharacterEntity {
         } else {
             attention.target = lookTarget ?? userPosition
         }
-        attention.update(deltaTime: deltaTime, origin: headOrigin(), bodyYaw: hop.yaw)
+        attention.update(deltaTime: deltaTime, origin: headOrigin(), bodyYaw: bodyYaw)
 
         // The double-take: the body turns to follow only when the head has run out of reach
-        // and only when locomotion is not already using the body.
-        if let requested = attention.bodyTurnRequest, !hop.isMoving {
+        // and only when locomotion is not already using the body. A perched bird's yaw
+        // belongs to the hand, so it never turns itself off the palm.
+        if let requested = attention.bodyTurnRequest, !hop.isMoving, !perch.isEngaged {
             hop.place(at: position, yaw: requested)
             attention.bodyTurnServed()
         }
     }
 
     private func advanceIdle(deltaTime: Float) {
-        guard machine.state == .idle, !hop.isMoving else { return }
+        guard machine.state == .idle, !hop.isMoving, !perch.isEngaged else { return }
         idle.userSilence = userSilence
         guard let behavior = idle.update(deltaTime: deltaTime) else { return }
         switch behavior {
@@ -234,19 +296,26 @@ public final class CharacterEntity {
     /// Writes this frame's values onto the rig. Every entity touched per frame is touched
     /// here and nowhere else.
     private func writeToRig() {
+        let engaged = perch.isEngaged
+        let bobHeight = engaged ? 0 : hop.bobHeight
+        let bodyDip = engaged ? perch.bodyDip : hop.bodyDip
+        let wingExtension = engaged ? perch.wingExtension : hop.wingExtension
+        let tailPitch = engaged ? perch.tailPitch : hop.tailPitch
+
         root.position = SIMD3(position.x, position.y, position.z)
-        root.orientation = simd_quatf(angle: hop.yaw, axis: SIMD3(0, 1, 0))
+        root.orientation = simd_quatf(angle: bodyYaw, axis: SIMD3(0, 1, 0))
+            * simd_quatf(angle: engaged ? perch.bank : 0, axis: SIMD3(0, 0, 1))
 
         let parameters = face.parameters
         let scale = rig.proportions.normalizationScale
 
         if let bob = rig.entity(.bob) {
-            bob.position.y = hop.bobHeight
+            bob.position.y = bobHeight
         }
         if let body = rig.entity(.body) {
             body.scale = rig.proportions.bodyScale * animator.bodyScale
             body.position.y = rig.proportions.bodyCenterY
-                + (hop.bodyDip + parameters.bodyRaise * rig.proportions.bodyDiameter) / scale
+                + (bodyDip + parameters.bodyRaise * rig.proportions.bodyDiameter) / scale
         }
         if let head = rig.entity(.head) {
             head.orientation = simd_quatf(angle: attention.headYaw, axis: SIMD3(0, 1, 0))
@@ -282,12 +351,12 @@ public final class CharacterEntity {
         for (joint, side) in [(BirdRig.Joint.wingL, Float(-1)), (.wingR, 1)] {
             guard let wing = rig.entity(joint) else { continue }
             wing.orientation = simd_quatf(
-                angle: side * hop.wingExtension * 0.9,
+                angle: side * wingExtension * 0.9,
                 axis: SIMD3(0, 0, 1)
             )
         }
         if let tail = rig.entity(.tail) {
-            tail.orientation = simd_quatf(angle: 0.32 + hop.tailPitch, axis: SIMD3(1, 0, 0))
+            tail.orientation = simd_quatf(angle: 0.32 + tailPitch, axis: SIMD3(1, 0, 0))
         }
     }
 

@@ -17,6 +17,9 @@ struct ImmersiveView: View {
 
     @State private var character = CharacterEntity()
     @State private var lastUpdate = CACurrentMediaTime()
+    /// Hand tracking runs its own ARKit session; the scene provider's session owns world and
+    /// plane data and has a different lifetime (it survives leaving the immersive space).
+    @State private var hands = HandTrackingSession()
 
     var body: some View {
         RealityView { content, attachments in
@@ -40,6 +43,16 @@ struct ImmersiveView: View {
                 onSignal: { character.signal($0) }
             )
 
+            // Palm debug marker: green where an offered palm was detected, which is also
+            // exactly the point the bird flies to. One sphere, so "detection works" and
+            // "it flies to the right place" are the same observation.
+            let palmMarker = ModelEntity(
+                mesh: .generateSphere(radius: 0.02),
+                materials: [UnlitMaterial(color: .green)]
+            )
+            palmMarker.isEnabled = false
+            root.addChild(palmMarker)
+
             // The inspector's selection, drawn where the record actually is.
             let highlight = ModelEntity(
                 mesh: .generateSphere(radius: 0.06),
@@ -58,6 +71,15 @@ struct ImmersiveView: View {
                 let now = CACurrentMediaTime()
                 let delta = Float(min(now - lastUpdate, 0.1))
                 lastUpdate = now
+                let palm = hands.update(deltaTime: delta)
+                if let palm {
+                    palmMarker.position = palm.landing
+                    palmMarker.isEnabled = true
+                } else {
+                    palmMarker.isEnabled = false
+                }
+                character.offerPalm(palm)
+
                 character.update(deltaTime: delta, userPosition: model.scene.userPosition)
                 session.characterPosition = character.position
             }

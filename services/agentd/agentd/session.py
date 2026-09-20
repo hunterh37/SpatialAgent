@@ -162,6 +162,8 @@ class Session:
             # Partial transcript: the character looks up, the model stays out of it.
             return
 
+        # Unprompted speech yields to the user for 30s (spec/07-memory.md Curiosity).
+        self.ambient.note_utterance()
         self.history.append({"role": "user", "content": text})
         self._trim()
 
