@@ -111,7 +111,12 @@ class AmbientBus:
         """Rate-limited. Returns the event that was queued, or None if it was dropped."""
         # A `now` event is a doorbell, and a doorbell that waits 30 seconds is not a
         # doorbell. Everything else yields to the conversation.
-        if interrupt != "now" and _INTERRUPT_BY_KIND.get(kind) != "now" and self.in_utterance_quiet():
+        if (
+            interrupt != "now"
+            and _INTERRUPT_BY_KIND.get(kind) != "now"
+            and kind != "finished"
+            and self.in_utterance_quiet()
+        ):
             return None
         if not self._limiter.allow(source):
             return None
@@ -127,6 +132,72 @@ class AmbientBus:
         while not self._queue.empty():
             out.append(self._queue.get_nowait())
         return out
+
+
+class TimerBus:
+    """Timers the user set, as ambient events.
+
+    Phase E: the home speaks first for more than device diffs. A timer is the smallest
+    example that is unambiguously worth interrupting for — the user asked for this
+    interruption, at this time, on purpose — which is why it is `now` rather than `passing`
+    and why it is exempt from the utterance-quiet window in the same way a doorbell is.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._timers: dict[str, tuple[float, str]] = {}
+
+    def set(self, name: str, seconds: float) -> str:
+        """Returns the source id the resulting ambient event will carry."""
+        source = f"timer.{name.strip().lower().replace(' ', '_') or 'timer'}"
+        self._timers[source] = (self._clock() + max(0.0, seconds), name)
+        return source
+
+    def cancel(self, source: str) -> bool:
+        return self._timers.pop(source, None) is not None
+
+    @property
+    def pending(self) -> list[str]:
+        return sorted(self._timers)
+
+    def due(self) -> list[tuple[str, AmbientKind, str]]:
+        """Fired timers, as `(source, kind, text)` — the same shape `diff_devices` returns,
+        so the bus takes both without knowing which is which."""
+        now = self._clock()
+        fired = [(source, name) for source, (at, name) in self._timers.items() if at <= now]
+        for source, _ in fired:
+            self._timers.pop(source, None)
+        return [(source, "finished", f"Your {name} timer is up.") for source, name in fired]
+
+
+#: Devices whose "running -> not running" transition is an appliance finishing rather than a
+#: state change nobody asked about. A washing machine that finishes is worth a sentence; a
+#: light that turns off is not.
+APPLIANCE_DONE_KEYS = ("running", "active", "washing", "drying", "cooking")
+
+
+def appliance_completions(
+    before: list[Device], after: list[Device]
+) -> list[tuple[str, AmbientKind, str]]:
+    """Appliances that just finished.
+
+    Split out from `diff_devices` rather than folded into it because the interrupt level is
+    different: a completion is `passing` and deserves a sentence, while the same device's
+    other state changes are `silent`.
+    """
+    prior = {d.id: d for d in before}
+    out: list[tuple[str, AmbientKind, str]] = []
+    for device in after:
+        old = prior.get(device.id)
+        if old is None:
+            continue
+        for key in APPLIANCE_DONE_KEYS:
+            was = bool(old.state.get(key))
+            now = bool(device.state.get(key))
+            if was and not now:
+                out.append((device.id, "finished", f"The {device.name} has finished."))
+                break
+    return out
 
 
 def diff_devices(before: list[Device], after: list[Device]) -> list[tuple[str, AmbientKind, str]]:
@@ -145,6 +216,14 @@ def diff_devices(before: list[Device], after: list[Device]) -> list[tuple[str, A
 
         if device.kind == "sensor" and device.state.get("ringing") and not old.state.get("ringing"):
             events.append((device.id, "doorbell", f"{device.name} is ringing."))
+            continue
+
+        # An appliance finishing is its own event with its own interrupt level; it must not
+        # also be reported as a state change.
+        if any(
+            bool(old.state.get(key)) and not bool(device.state.get(key))
+            for key in APPLIANCE_DONE_KEYS
+        ):
             continue
 
         changed = [k for k, v in device.state.items() if old.state.get(k) != v]

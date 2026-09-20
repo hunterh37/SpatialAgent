@@ -88,3 +88,65 @@ def test_the_quiet_window_is_not_armed_before_anyone_speaks() -> None:
     bus = AmbientBus()
     assert not bus.in_utterance_quiet()
     assert bus.offer("light.kitchen", "stateChange", "Kitchen light: on.") is not None
+
+
+# --- ambient sources beyond device diffs (phase E) --------------------------------------
+
+
+def test_a_timer_fires_as_an_ambient_event() -> None:
+    from agentd.ambient import TimerBus
+
+    clock = [0.0]
+    timers = TimerBus(clock=lambda: clock[0])
+    source = timers.set("pasta", 300)
+    assert timers.pending == [source]
+    assert timers.due() == []
+
+    clock[0] = 301
+    fired = timers.due()
+    assert fired == [(source, "finished", "Your pasta timer is up.")]
+    # And it fires once.
+    assert timers.due() == []
+    assert timers.pending == []
+
+
+def test_a_cancelled_timer_never_fires() -> None:
+    from agentd.ambient import TimerBus
+
+    clock = [0.0]
+    timers = TimerBus(clock=lambda: clock[0])
+    source = timers.set("pasta", 10)
+    assert timers.cancel(source)
+    clock[0] = 100
+    assert timers.due() == []
+    assert not timers.cancel(source)
+
+
+def test_an_appliance_finishing_is_its_own_event() -> None:
+    from agentd.ambient import appliance_completions, diff_devices
+    from agentd.protocol import Device
+
+    before = [Device(id="w1", name="washing machine", kind="other", state={"running": True})]
+    after = [Device(id="w1", name="washing machine", kind="other", state={"running": False})]
+
+    done = appliance_completions(before, after)
+    assert done == [("w1", "finished", "The washing machine has finished.")]
+    # And it is not also reported as a bare state change.
+    assert diff_devices(before, after) == []
+
+
+def test_an_appliance_starting_is_not_a_completion() -> None:
+    from agentd.ambient import appliance_completions
+    from agentd.protocol import Device
+
+    before = [Device(id="w1", name="washing machine", kind="other", state={"running": False})]
+    after = [Device(id="w1", name="washing machine", kind="other", state={"running": True})]
+    assert appliance_completions(before, after) == []
+
+
+def test_a_finished_event_does_not_wait_for_the_quiet_window() -> None:
+    clock = [1000.0]
+    bus = AmbientBus(clock=lambda: clock[0])
+    bus.note_utterance()
+    clock[0] += 1
+    assert bus.offer("w1", "finished", "The washing machine has finished.") is not None

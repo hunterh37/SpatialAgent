@@ -423,6 +423,20 @@ Nothing in `agentd` changes when it lands — that is what the executor boundary
 Then ambient sources beyond device diffs (timers, appliance completion), and multi-room maps
 keyed by relocalized room.
 
+Status: done.
+
+- Companion: `apps/SpatialAgentHome` (macOS target linking `HomeBridge`), `CompanionServer`
+  serving three loopback-only endpoints, and `HomeKitBridge.execute` implemented against
+  HomeKit characteristics. The server half is `agentd/home/companion.py`, a `HomeExecutor`
+  plugged in with `AGENTD_HOME=companion`; the agent loop is untouched. A missing companion
+  fails loudly rather than silently doing nothing.
+- Ambient: `TimerBus` and `appliance_completions` in `agentd/ambient.py`, a `set_timer` tool
+  handled by the session, and both exempt from the utterance-quiet window on the same grounds
+  as a doorbell.
+- Multi-room: `RoomRegistry` identifies a room by relocalized-anchor overlap (25%, minimum 2)
+  and hands out the `MapStore` for it; an unknown space becomes a new room rather than being
+  merged into a known map, and forgetting a room forgets its map.
+
 ---
 
 ## Cross-cutting

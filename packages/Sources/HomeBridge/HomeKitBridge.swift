@@ -38,8 +38,93 @@ public final class HomeKitBridge: NSObject, HomeProviding {
         }
     }
 
+    /// Real execution against HomeKit characteristics.
+    ///
+    /// The tool surface is the abstract one from spec/04-home.md; the mapping from a tool to
+    /// a characteristic type lives here and nowhere else, so adding Matter or a hub later is
+    /// a second `HomeProviding` rather than a change to the agent loop.
     public func execute(tool: String, args: JSONObject?) async throws -> JSONObject {
-        throw HomeError.unknownTool(tool)
+        switch tool {
+        case "list_devices":
+            try await refresh()
+            return ["devices": .array(devices.map { .string($0.id) })]
+
+        case "get_device_state":
+            let id = args?["device_id"]?.stringValue ?? ""
+            guard let service = service(id: id) else { throw HomeError.unknownDevice(id) }
+            return try await readState(of: service)
+
+        case "set_light":
+            let id = args?["device_id"]?.stringValue ?? ""
+            guard let service = service(id: id) else { throw HomeError.unknownDevice(id) }
+            if let on = args?["on"]?.boolValue {
+                try await write(on, to: service, type: HMCharacteristicTypePowerState)
+            }
+            if let brightness = args?["brightness"]?.doubleValue {
+                try await write(
+                    Int(brightness.rounded()),
+                    to: service,
+                    type: HMCharacteristicTypeBrightness
+                )
+            }
+            return try await readState(of: service)
+
+        case "set_lock":
+            let id = args?["device_id"]?.stringValue ?? ""
+            guard let service = service(id: id) else { throw HomeError.unknownDevice(id) }
+            guard let locked = args?["locked"]?.boolValue else {
+                throw HomeError.unsupportedCapability(device: id, capability: "lock")
+            }
+            // Unsafe by the table in spec/04-home.md: by the time it reaches here the user
+            // has already confirmed on the headset. The Mac executes; it does not decide.
+            try await write(
+                locked ? 1 : 0,
+                to: service,
+                type: HMCharacteristicTypeTargetLockMechanismState
+            )
+            return try await readState(of: service)
+
+        default:
+            throw HomeError.unknownTool(tool)
+        }
+    }
+
+    private func service(id: String) -> HMService? {
+        guard let home = manager.primaryHome else { return nil }
+        for accessory in home.accessories {
+            for service in accessory.services where service.uniqueIdentifier.uuidString == id {
+                return service
+            }
+        }
+        return nil
+    }
+
+    private func write(_ value: Any, to service: HMService, type: String) async throws {
+        guard let characteristic = service.characteristics.first(
+            where: { $0.characteristicType == type }
+        ) else {
+            throw HomeError.unsupportedCapability(device: service.name, capability: type)
+        }
+        try await characteristic.writeValue(value)
+    }
+
+    private func readState(of service: HMService) async throws -> JSONObject {
+        var state = JSONObject()
+        for characteristic in service.characteristics {
+            try? await characteristic.readValue()
+            switch characteristic.characteristicType {
+            case HMCharacteristicTypePowerState:
+                state["on"] = .bool(characteristic.value as? Bool ?? false)
+            case HMCharacteristicTypeBrightness:
+                state["brightness"] = .number(Double(characteristic.value as? Int ?? 0))
+            case HMCharacteristicTypeCurrentLockMechanismState,
+                 HMCharacteristicTypeTargetLockMechanismState:
+                state["locked"] = .bool((characteristic.value as? Int ?? 0) == 1)
+            default:
+                continue
+            }
+        }
+        return state
     }
 
     private static func kind(for serviceType: String) -> DeviceKind? {

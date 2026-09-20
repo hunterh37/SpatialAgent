@@ -55,6 +55,7 @@ public enum ToolSafety {
         "list_devices": .safe,
         "get_device_state": .safe,
         "set_light": .safe,
+        "set_timer": .safe,
         "set_scene": .safe,
         "set_thermostat": .safe,
         "set_media": .safe,

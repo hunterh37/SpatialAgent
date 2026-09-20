@@ -444,3 +444,42 @@ async def test_the_server_waits_longer_for_a_human_than_for_a_machine() -> None:
     home = MockHome(Scenario.load("apartment").devices)
     executor = ServerExecutor(home, timeout=30.0)
     assert executor._confirm_timeout > executor._timeout
+
+
+async def test_a_timer_the_model_sets_comes_back_as_an_ambient_event() -> None:
+    """Phase E: ambient sources beyond device diffs."""
+    from agentd.adapters.base import Chunk
+    from agentd.protocol import AmbientEvent
+
+    adapter = EchoAdapter(scripted=[
+        Chunk(tool_calls=[{"function": {"name": "set_timer",
+                                        "arguments": {"name": "pasta", "seconds": 300}}}]),
+        Chunk(done=True),
+    ])
+    session = Session(adapter, default_registry())
+    await _collect(session, "set a timer for the pasta, five minutes")
+
+    assert session.timers.pending == ["timer.pasta"]
+    # Nothing fires early.
+    assert session.due_timers() == []
+
+    # The timer comes up.
+    session.timers._timers["timer.pasta"] = (0.0, "pasta")
+    fired = session.due_timers()
+    assert [type(e) for e in fired] == [AmbientEvent]
+    assert fired[0].kind == "finished"
+    assert "pasta" in fired[0].text
+
+
+async def test_an_appliance_finishing_reaches_the_client_as_an_ambient_event() -> None:
+    from agentd.protocol import Device
+
+    session = Session(EchoAdapter(), default_registry())
+    session.update_devices([
+        Device(id="w1", name="washing machine", kind="other", state={"running": True})
+    ])
+    events = session.update_devices([
+        Device(id="w1", name="washing machine", kind="other", state={"running": False})
+    ])
+    assert [e.kind for e in events] == ["finished"]
+    assert events[0].interrupt == "passing"

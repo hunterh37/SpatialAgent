@@ -18,6 +18,9 @@ WALK_TO = "walk_to"
 LOOK_AT = "look_at"
 CHARACTER_TOOLS = frozenset({ASK_FOR_PLACE, WALK_TO, LOOK_AT})
 
+# Handled by the session too: a timer is an ambient source, not a home device.
+SET_TIMER = "set_timer"
+
 
 @dataclass(frozen=True)
 class Tool:
@@ -164,6 +167,18 @@ def default_registry() -> ToolRegistry:
                 ),
                 safety="safe",
                 parameters={"name": {"type": "string", "required": True}},
+            ),
+            Tool(
+                name=SET_TIMER,
+                description=(
+                    "Set a timer the user asked for, in seconds. You will be told when it "
+                    "is up; do not try to count time yourself."
+                ),
+                safety="safe",
+                parameters={
+                    "name": {"type": "string", "required": True},
+                    "seconds": {"type": "number", "required": True},
+                },
             ),
             Tool(
                 name="set_lock",

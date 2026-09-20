@@ -1,0 +1,37 @@
+name: SpatialAgentHome
+options:
+  bundleIdPrefix: io.medvr
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+
+packages:
+  SpatialAgentKit:
+    path: ../../packages
+
+targets:
+  SpatialAgentHome:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    dependencies:
+      - package: SpatialAgentKit
+        product: HomeBridge
+      - package: SpatialAgentKit
+        product: AgentProtocol
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: SpatialAgent Home
+        LSMinimumSystemVersion: "15.0"
+        # HomeKit asks for this by name; without it the authorization sheet never appears.
+        NSHomeKitUsageDescription: >-
+          SpatialAgent controls the lights and locks you approve on your headset. Nothing
+          about your home leaves this Mac.
+    entitlements:
+      path: Resources/SpatialAgentHome.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.server: true
+        com.apple.developer.homekit: true

@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from .adapters.base import ModelAdapter
-from .ambient import AmbientBus, diff_devices
+from .ambient import AmbientBus, TimerBus, appliance_completions, diff_devices
 from .directives import directives_for
 from .executors import ClientExecutor, Outcome, PendingCalls, ToolExecutor
 from .prompt import build_system_prompt
@@ -42,7 +42,7 @@ from .teaching import (
 )
 from .teaching import register as register_teaching
 from .thinking import ThinkingFilter
-from .tools import ASK_FOR_PLACE, LOOK_AT, WALK_TO, ToolRegistry
+from .tools import ASK_FOR_PLACE, LOOK_AT, SET_TIMER, WALK_TO, ToolRegistry
 
 log = logging.getLogger("agentd.session")
 
@@ -73,6 +73,8 @@ class Session:
         self.history: list[dict[str, Any]] = []
         self.pending = PendingCalls()
         self.ambient = AmbientBus()
+        # Ambient sources beyond device diffs (phase E): a timer the user asked for.
+        self.timers = TimerBus()
         self.touched_at = time.monotonic()
         # Places the agent has already asked about, so it stops asking (todo 3).
         self.requested_places: set[str] = set()
@@ -122,13 +124,25 @@ class Session:
 
         events: list[AmbientEvent] = []
         if self.devices:
-            for source, kind, text in diff_devices(self.devices, devices):
+            candidates = appliance_completions(self.devices, devices)
+            candidates += diff_devices(self.devices, devices)
+            for source, kind, text in candidates:
                 event = self.ambient.offer(source, kind, text)
                 if event is not None:
                     events.append(event)
         self.devices = devices
         self.touch()
         return events
+
+    def due_timers(self) -> list[AmbientEvent]:
+        """Timers that have come up since the last check. Polled rather than scheduled: the
+        socket loop is already awake, and a timer that fires a second late is a timer."""
+        out: list[AmbientEvent] = []
+        for source, kind, text in self.timers.due():
+            event = self.ambient.offer(source, kind, text)
+            if event is not None:
+                out.append(event)
+        return out
 
     def note_ambient(self, event: AmbientEvent) -> None:
         """Ambient events enter the transcript so the next reply knows they happened."""
@@ -237,6 +251,22 @@ class Session:
         if name == LOOK_AT:
             async for event in self._look_at(args):
                 yield event
+            return
+
+        if name == SET_TIMER:
+            label = str(args.get("name") or "").strip() or "timer"
+            try:
+                seconds = float(args.get("seconds") or 0)
+            except (TypeError, ValueError):
+                seconds = 0.0
+            source = self.timers.set(label, seconds)
+            self.history.append(
+                {
+                    "role": "tool",
+                    "name": SET_TIMER,
+                    "content": _compact({"timer": label, "seconds": seconds, "source": source}),
+                }
+            )
             return
 
         if name in TEACHING_TOOLS:

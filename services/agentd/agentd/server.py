@@ -64,12 +64,21 @@ def build_adapter() -> ModelAdapter:
 
 
 def build_executor() -> ToolExecutor:
-    """`AGENTD_HOME=mock` executes here; the default leaves execution to the client.
+    """`AGENTD_HOME=companion|mock` executes here; the default leaves execution to the client.
 
     HomeKit is absent from the visionOS SDK, so the shipping answer is a macOS companion
     plugged in here as another `HomeExecutor` (docs/middle-layer-todo.md 1).
     """
     mode = os.environ.get("AGENTD_HOME", "client")
+    if mode == "companion":
+        # The Mac app owns HomeKit authorization and the execution; this process owns the
+        # decision. Plugged in here and nowhere else, which is what the executor boundary
+        # bought (docs/middle-layer-todo.md 1).
+        from .home import CompanionHome
+
+        return ServerExecutor(
+            CompanionHome(os.environ.get("AGENTD_COMPANION_URL", "http://127.0.0.1:8790"))
+        )
     if mode == "mock":
         from mocks.mock_home import MockHome
         from mocks.scenario import Scenario
@@ -176,6 +185,12 @@ def create_app(
                 if session is None:
                     emit(Error(code="hello_required", message="send hello before anything else"))
                     continue
+
+                # Timers are the one ambient source with no external trigger, so they are
+                # checked wherever the loop is already awake.
+                for fired in session.due_timers():
+                    session.note_ambient(fired)
+                    emit(fired)
 
                 if isinstance(message, SceneUpdate):
                     session.update_scene(message.scene)
