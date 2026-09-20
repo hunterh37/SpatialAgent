@@ -36,6 +36,9 @@ Test: `BirdRigTests` asserts entity count, material count, that head diameter is
 body diameter, eye diameter is 0.30–0.36 of head, and that the computed bounds bottom is at
 y=0 within 1mm.
 
+Status: done — `BirdRig`/`BirdProportions`/`BirdPalette` landed, 15 model entities, 3 materials,
+crown 22cm via uniform normalization (the spec's part sizes stand 17.9cm), `BirdRigTests` green.
+
 ### A2 — Procedural motion core
 
 New: `Bird/BirdAnimator.swift`, `Bird/Spring.swift`, `Bird/Easing.swift`.
