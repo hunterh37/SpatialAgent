@@ -124,6 +124,9 @@ and never sits still.
 Test: `IdlePoolTests` runs 1000 selections and asserts no immediate repeats, that every
 behavior is reachable, and that weight shifts change the distribution in the stated direction.
 
+Status: done — `IdlePool`: 8 behaviors, 4–9s timer, no-immediate-repeat by construction,
+mood/silence shifts monotonic and floored so nothing becomes unreachable at the extremes.
+
 ### A7 — State mapping and integration
 
 Modifies: `CharacterEntity.swift`, `ImmersiveView.swift`.
