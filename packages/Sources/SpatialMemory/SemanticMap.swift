@@ -224,15 +224,40 @@ public struct SemanticMap: Codable, Hashable, Sendable {
 
     // MARK: - Wire
 
-    /// Places as the existing `SceneSnapshot` carries them. B4 replaces this with the fully
-    /// abstracted, coordinate-free view.
+    /// The abstracted view `agentd` receives: place names and kinds, object names and their
+    /// device bindings, rule kinds, activity names, and the place the user is standing in
+    /// (spec 07 §Enforcement).
+    ///
+    /// The user's position goes in as the *name* of the place containing it, which is the
+    /// whole design: the model needs to know the user is at the desk, and it never needs to
+    /// know where the desk is.
     public func snapshot(userPosition: SIMD3<Float>?, floorArea: Double?) -> SceneSnapshot {
         SceneSnapshot(
             places: places.map(\.wire),
-            floorArea: floorArea,
-            userPosition: userPosition.map {
-                Vec3(x: Double($0.x), y: Double($0.y), z: Double($0.z))
-            }
+            objects: objects.map { object in
+                MapObjectRef(
+                    name: object.name,
+                    deviceId: object.deviceId,
+                    place: object.placeId.flatMap { place(id: $0)?.name }
+                )
+            },
+            rules: rules.map { rule in
+                MapRuleRef(
+                    kind: rule.kind.rawValue,
+                    severity: rule.severity.rawValue,
+                    name: rule.name,
+                    place: containingPlace(of: rule.position)?.name
+                )
+            },
+            activities: activities.map { activity in
+                MapActivityRef(
+                    name: activity.name,
+                    place: activity.placeId.flatMap { place(id: $0)?.name }
+                )
+            },
+            userPlace: userPosition.flatMap { containingPlace(of: $0)?.name },
+            floorArea: floorArea
         )
     }
+
 }

@@ -26,7 +26,9 @@ from .protocol import (
     Error,
     Hello,
     HomeDevices,
-    NamedPlace,
+    MapPlace,
+    MapObjectRef,
+    MapRuleRef,
     Ping,
     Pong,
     Ready,
@@ -38,7 +40,6 @@ from .protocol import (
     ToolResult,
     UserUtterance,
     UtteranceEnd,
-    Vec3,
 )
 
 CORPUS_PATH = (
@@ -49,7 +50,7 @@ CORPUS_PATH = (
     / "corpus.json"
 )
 
-_KITCHEN = NamedPlace(name="kitchen", position=Vec3(x=2.4, y=0.0, z=-1.8), radius=0.9)
+_KITCHEN = MapPlace(name="kitchen", kind="generic", navigable=True)
 _LIGHT = Device(
     id="light.kitchen",
     name="Kitchen Lights",
@@ -67,7 +68,13 @@ def client_messages() -> list[Any]:
         UserUtterance(id="u1", text="turn off the kitchen lights"),
         UserUtterance(id="u2", text="turn off the", isFinal=False),
         SceneUpdate(
-            scene=SceneSnapshot(places=[_KITCHEN], floorArea=46.0, userPosition=Vec3(x=0, y=0, z=0))
+            scene=SceneSnapshot(
+                places=[_KITCHEN],
+                objects=[MapObjectRef(name="coffee machine", deviceId="dev-1", place="kitchen")],
+                rules=[MapRuleRef(kind="forbidden", severity="hard", name="the shrine")],
+                userPlace="kitchen",
+                floorArea=46.0,
+            )
         ),
         DeviceStates(devices=[_LIGHT]),
         ToolResult(callId="c1", ok=True, payload={"id": "light.kitchen", "state": {"on": False}}),

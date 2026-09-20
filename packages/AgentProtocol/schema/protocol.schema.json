@@ -7,46 +7,110 @@
     "ProtocolVersion": {
       "const": 1
     },
-    "Vec3": {
-      "type": "object",
-      "required": [
-        "x",
-        "y",
-        "z"
-      ],
-      "properties": {
-        "x": {
-          "type": "number"
-        },
-        "y": {
-          "type": "number"
-        },
-        "z": {
-          "type": "number"
-        }
-      }
-    },
-    "NamedPlace": {
+    "MapPlace": {
+      "description": "A taught place, by name only. Coordinates never leave the client (spec/07-memory.md).",
       "type": "object",
       "required": [
         "name",
-        "position",
-        "radius"
+        "kind"
       ],
       "properties": {
         "name": {
           "type": "string"
         },
-        "position": {
-          "$ref": "#/definitions/Vec3"
+        "kind": {
+          "enum": [
+            "generic",
+            "workspace",
+            "surface",
+            "floor",
+            "perch"
+          ]
         },
-        "radius": {
-          "type": "number",
-          "minimum": 0.1
+        "navigable": {
+          "type": "boolean",
+          "description": "False when the anchor has not relocalized; the bird can name it but not walk to it."
+        }
+      }
+    },
+    "MapObjectRef": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "place": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Name of the containing place, if any."
+        }
+      }
+    },
+    "MapRuleRef": {
+      "type": "object",
+      "required": [
+        "kind",
+        "severity"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "forbidden",
+            "quiet",
+            "perch",
+            "fragile"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "hard",
+            "soft"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "place": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "MapActivityRef": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "place": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
     "SceneSnapshot": {
+      "description": "The abstracted map: names, kinds and coarse relationships. No coordinates, no camera frames, no reconstructions (spec/07-memory.md Enforcement).",
       "type": "object",
       "required": [
         "places"
@@ -55,14 +119,36 @@
         "places": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/NamedPlace"
+            "$ref": "#/definitions/MapPlace"
           }
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MapObjectRef"
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MapRuleRef"
+          }
+        },
+        "activities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MapActivityRef"
+          }
+        },
+        "userPlace": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Name of the place the user is currently inside, if any."
         },
         "floorArea": {
           "type": "number"
-        },
-        "userPosition": {
-          "$ref": "#/definitions/Vec3"
         }
       }
     },

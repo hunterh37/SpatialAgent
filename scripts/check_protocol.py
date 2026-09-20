@@ -62,7 +62,16 @@ def main() -> int:
     expected.update(message_fields(definitions["ServerEvent"]))
     quoted = set(expected)
     # Shared object definitions have to exist in both languages too.
-    for name in ("Capabilities", "Device", "CharacterDirective", "NamedPlace", "SceneSnapshot"):
+    for name in (
+        "Capabilities",
+        "Device",
+        "CharacterDirective",
+        "MapPlace",
+        "MapObjectRef",
+        "MapRuleRef",
+        "MapActivityRef",
+        "SceneSnapshot",
+    ):
         expected[name] = set(definitions[name]["properties"])
 
     problems: list[str] = []

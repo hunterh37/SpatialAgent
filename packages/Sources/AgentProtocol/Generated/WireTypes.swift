@@ -14,39 +14,90 @@ public enum Wire {
 
 // MARK: - Geometry
 
-public struct Vec3: Codable, Hashable, Sendable {
-    public var x: Double
-    public var y: Double
-    public var z: Double
 
-    public init(x: Double, y: Double, z: Double) {
-        self.x = x
-        self.y = y
-        self.z = z
-    }
-}
-
-public struct NamedPlace: Codable, Hashable, Sendable {
+/// A taught place, by name only.
+///
+/// Coordinates never leave the client (spec/07-memory.md §Enforcement), so the wire form of a
+/// place carries what the model can reason about — a name, a kind, and whether the bird can
+/// currently get there — and nothing it could use to locate the user's furniture.
+public struct MapPlace: Codable, Hashable, Sendable {
     public var name: String
-    public var position: Vec3
-    public var radius: Double
+    public var kind: String
+    /// False when the anchor has not relocalized: the bird can talk about it, not walk to it.
+    public var navigable: Bool
 
-    public init(name: String, position: Vec3, radius: Double) {
+    public init(name: String, kind: String = "generic", navigable: Bool = true) {
         self.name = name
-        self.position = position
-        self.radius = max(0.1, radius)
+        self.kind = kind
+        self.navigable = navigable
     }
 }
 
-public struct SceneSnapshot: Codable, Hashable, Sendable {
-    public var places: [NamedPlace]
-    public var floorArea: Double?
-    public var userPosition: Vec3?
+public struct MapObjectRef: Codable, Hashable, Sendable {
+    public var name: String
+    public var deviceId: String?
+    /// Name of the containing place, if any.
+    public var place: String?
 
-    public init(places: [NamedPlace], floorArea: Double? = nil, userPosition: Vec3? = nil) {
+    public init(name: String, deviceId: String? = nil, place: String? = nil) {
+        self.name = name
+        self.deviceId = deviceId
+        self.place = place
+    }
+}
+
+public struct MapRuleRef: Codable, Hashable, Sendable {
+    public var kind: String
+    public var severity: String
+    public var name: String?
+    public var place: String?
+
+    public init(kind: String, severity: String, name: String? = nil, place: String? = nil) {
+        self.kind = kind
+        self.severity = severity
+        self.name = name
+        self.place = place
+    }
+}
+
+public struct MapActivityRef: Codable, Hashable, Sendable {
+    public var name: String
+    public var place: String?
+
+    public init(name: String, place: String? = nil) {
+        self.name = name
+        self.place = place
+    }
+}
+
+/// The abstracted map: names, kinds and coarse relationships.
+///
+/// There is deliberately no `Vec3` anywhere in this type. The privacy claim in PRD §8 is only
+/// as strong as the wire format that carries it, so the format simply has nowhere to put a
+/// coordinate.
+public struct SceneSnapshot: Codable, Hashable, Sendable {
+    public var places: [MapPlace]
+    public var objects: [MapObjectRef]
+    public var rules: [MapRuleRef]
+    public var activities: [MapActivityRef]
+    /// Name of the place the user is currently inside, if any.
+    public var userPlace: String?
+    public var floorArea: Double?
+
+    public init(
+        places: [MapPlace],
+        objects: [MapObjectRef] = [],
+        rules: [MapRuleRef] = [],
+        activities: [MapActivityRef] = [],
+        userPlace: String? = nil,
+        floorArea: Double? = nil
+    ) {
         self.places = places
+        self.objects = objects
+        self.rules = rules
+        self.activities = activities
+        self.userPlace = userPlace
         self.floorArea = floorArea
-        self.userPosition = userPosition
     }
 }
 

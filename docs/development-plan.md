@@ -225,6 +225,12 @@ Done: the model's prompt describes the room in names, and `scripts/check_protoco
 Test: `ConformanceTests` plus `test_prompt_describes_the_taught_room`; a Python test asserts no
 numeric coordinate field exists anywhere in the abstracted payload.
 
+Status: done — schema replaced `NamedPlace`/`Vec3` with `MapPlace`/`MapObjectRef`/`MapRuleRef`/
+`MapActivityRef`; `SceneSnapshot` now carries names, kinds, device bindings, rule kinds,
+activities and `userPlace`, and has nowhere to put a coordinate. Prompt rewritten to describe
+the room in names; `tests/test_abstract_map.py` asserts `floorArea` is the only number on the
+wire. `check_protocol.py` updated; corpus regenerated.
+
 ---
 
 ## Phase C — Teaching (spec/07-memory.md §Teaching)

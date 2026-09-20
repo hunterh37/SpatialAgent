@@ -14,28 +14,57 @@ from pydantic import BaseModel, Field
 PROTOCOL_VERSION = 1
 
 
-class Vec3(BaseModel):
-    x: float
-    y: float
-    z: float
+class MapPlace(BaseModel):
+    """A taught place, by name only.
 
+    Coordinates never leave the client (spec/07-memory.md Enforcement), so there is nowhere
+    in this model to put one. That is the privacy claim expressed as a type rather than as a
+    promise.
+    """
 
-class NamedPlace(BaseModel):
     name: str
-    position: Vec3
-    radius: float = 0.5
+    kind: Literal["generic", "workspace", "surface", "floor", "perch"] = "generic"
+    navigable: bool = True
+
+
+class MapObjectRef(BaseModel):
+    name: str
+    deviceId: str | None = None
+    place: str | None = None
+
+
+class MapRuleRef(BaseModel):
+    kind: Literal["forbidden", "quiet", "perch", "fragile"]
+    severity: Literal["hard", "soft"]
+    name: str | None = None
+    place: str | None = None
+
+
+class MapActivityRef(BaseModel):
+    name: str
+    place: str | None = None
 
 
 class SceneSnapshot(BaseModel):
-    places: list[NamedPlace] = Field(default_factory=list)
+    """The abstracted map: names, kinds and coarse relationships."""
+
+    places: list[MapPlace] = Field(default_factory=list)
+    objects: list[MapObjectRef] = Field(default_factory=list)
+    rules: list[MapRuleRef] = Field(default_factory=list)
+    activities: list[MapActivityRef] = Field(default_factory=list)
+    userPlace: str | None = None
     floorArea: float | None = None
-    userPosition: Vec3 | None = None
 
     def place_names(self) -> list[str]:
         return [p.name for p in self.places]
 
     def has_place(self, name: str) -> bool:
         return any(p.name.lower() == name.lower() for p in self.places)
+
+    def navigable_place_names(self) -> list[str]:
+        """Places the bird can actually reach: an un-relocalized anchor is a name it can
+        talk about but not walk to."""
+        return [p.name for p in self.places if p.navigable]
 
 
 DeviceKind = Literal["light", "lock", "thermostat", "cover", "sensor", "scene", "media", "other"]

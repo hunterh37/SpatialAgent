@@ -26,23 +26,31 @@
     },
     {
       "scene": {
+        "activities": [],
         "floorArea": 46.0,
-        "places": [
+        "objects": [
           {
-            "name": "kitchen",
-            "position": {
-              "x": 2.4,
-              "y": 0.0,
-              "z": -1.8
-            },
-            "radius": 0.9
+            "deviceId": "dev-1",
+            "name": "coffee machine",
+            "place": "kitchen"
           }
         ],
-        "userPosition": {
-          "x": 0.0,
-          "y": 0.0,
-          "z": 0.0
-        }
+        "places": [
+          {
+            "kind": "generic",
+            "name": "kitchen",
+            "navigable": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "forbidden",
+            "name": "the shrine",
+            "place": null,
+            "severity": "hard"
+          }
+        ],
+        "userPlace": "kitchen"
       },
       "type": "sceneUpdate"
     },

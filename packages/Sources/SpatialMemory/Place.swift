@@ -106,13 +106,10 @@ public struct Place: MapRecord {
         simd_length(SIMD3(point.x - position.x, 0, point.z - position.z)) <= radius
     }
 
-    /// The abstracted form sent to the server: a name and a radius, no coordinates beyond
-    /// what `SceneSnapshot` already carried (spec 07 §Enforcement tightens this in B4).
-    public var wire: NamedPlace {
-        NamedPlace(
-            name: name,
-            position: Vec3(x: Double(position.x), y: Double(position.y), z: Double(position.z)),
-            radius: Double(radius)
-        )
+    /// The abstracted form sent to the server: a name, a kind, and whether the bird can
+    /// currently get there. No coordinates (spec 07 §Enforcement).
+    public var wire: MapPlace {
+        MapPlace(name: name, kind: kind.rawValue, navigable: isNavigable)
     }
+
 }
