@@ -407,6 +407,11 @@ baseline. Never displayed as a number, no grind path.
 Test: `MoodTests` asserts monotonic response to each input and that no public API exposes a
 raw value.
 
+Status: done — `Mood` keeps affinity non-public, reads out only as coarse `Warmth` plus three
+biases (idle weights, preferred distance, baseline expression and breath depth), saturates
+every positive input per session so there is no grind path, and lets negative inputs keep
+costing. Wired into `CharacterEntity` and fed from teaching acts through `bindCharacter`.
+
 ---
 
 ## Phase E — Home depth

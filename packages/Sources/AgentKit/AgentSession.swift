@@ -71,6 +71,9 @@ public final class AgentSession: ObservableObject {
     private var pendingPartialId: String?
     private var lastSceneSent: Date = .distantPast
     private var directiveSink: ((ResolvedDirective) -> Void)?
+    /// Affinity inputs, routed to the body. The session knows what happened; the entity owns
+    /// how it feels about it.
+    private var characterMood: ((Mood.Input) -> Void)?
     private var signalSink: ((CharacterEvent) -> Void)?
     /// Mirrors the renderer's machine so views can observe state without touching RealityKit.
     private var machine = CharacterStateMachine()
@@ -100,10 +103,12 @@ public final class AgentSession: ObservableObject {
     /// which keeps RealityKit out of this type and lets the whole session be unit-tested.
     public func bindCharacter(
         onDirective: @escaping (ResolvedDirective) -> Void,
-        onSignal: @escaping (CharacterEvent) -> Void
+        onSignal: @escaping (CharacterEvent) -> Void,
+        onMood: ((Mood.Input) -> Void)? = nil
     ) {
         directiveSink = onDirective
         signalSink = onSignal
+        characterMood = onMood
     }
 
     /// Attaches gaze capture so teaching acts have somewhere to land.
@@ -359,6 +364,7 @@ public final class AgentSession: ObservableObject {
     private func report(_ outcome: TeachingOutcome, callId: String, act: TeachingAct) async {
         switch outcome {
         case let .taught(_, name, _):
+            characterMood?(.taught)
             // Saying the name back is the confirmation channel for a mis-transcription, so
             // it happens here rather than being left to whatever the model says next.
             speakInCharacter("Okay — \(name).")
@@ -367,6 +373,7 @@ public final class AgentSession: ObservableObject {
                 .toolResult(callId: callId, ok: true, payload: ["name": .string(name)], error: nil)
             )
         case let .corrected(_, name, _):
+            characterMood?(.taught)
             speakInCharacter("Got it — \(name) now.")
             lastTaught = name
             await channel.send(

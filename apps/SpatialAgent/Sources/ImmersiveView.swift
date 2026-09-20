@@ -40,7 +40,8 @@ struct ImmersiveView: View {
 
             session.bindCharacter(
                 onDirective: { character.apply($0) },
-                onSignal: { character.signal($0) }
+                onSignal: { character.signal($0) },
+                onMood: { character.note($0) }
             )
 
             // Palm debug marker: green where an offered palm was detected, which is also

@@ -33,6 +33,9 @@ public final class CharacterEntity {
     public internal(set) var face = FaceController()
     public private(set) var attention = AttentionController()
     public private(set) var idle = IdlePool()
+    /// Affinity, and the three things it biases (spec 07 §Learned behavior). Never shown as
+    /// a number anywhere; the entity only reads its coarse outputs.
+    public private(set) var mood = Mood()
 
     /// 22cm at the crown (spec 06 §Proportions). Kept as a static for call sites that anchor
     /// UI above the head.
@@ -109,6 +112,12 @@ public final class CharacterEntity {
         apply(state: machine.state)
     }
 
+    /// Feeds affinity. Called by the session when something happened that should change how
+    /// the bird feels about the user.
+    public func note(_ input: Mood.Input) {
+        mood.note(input)
+    }
+
     public func signal(_ event: CharacterEvent) {
         let before = machine.state
         let after = machine.handle(event)
@@ -129,9 +138,11 @@ public final class CharacterEntity {
         stateEntered = CACurrentMediaTime()
         switch state {
         case .idle:
-            face.set(.neutral)
+            // The resting face is the mood's, not a constant: a wary bird does not idle
+            // with the same expression as an attached one.
+            face.set(mood.baselineExpression)
             animator.breathRate = 1.0
-            animator.breathDepth = 1.0
+            animator.breathDepth = mood.breathDepth
         case .listening:
             // Turns to the user, head tilt, crest forward, blinking slows.
             face.set(.curious)
@@ -212,6 +223,7 @@ public final class CharacterEntity {
         defer { lastUpdateCost = CACurrentMediaTime() - started }
 
         userSilence += deltaTime
+        mood.advance(seconds: deltaTime)
         animator.update(deltaTime: deltaTime)
         face.update(deltaTime: deltaTime)
         advancePerch(deltaTime: deltaTime)
@@ -279,6 +291,7 @@ public final class CharacterEntity {
     private func advanceIdle(deltaTime: Float) {
         guard machine.state == .idle, !hop.isMoving, !perch.isEngaged else { return }
         idle.userSilence = userSilence
+        idle.mood = mood.idleBias
         guard let behavior = idle.update(deltaTime: deltaTime) else { return }
         switch behavior {
         case .smallHop:
