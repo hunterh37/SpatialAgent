@@ -24,8 +24,11 @@ public final class CharacterEntity {
     /// Fixed and human-referenced. Life-size is uncanny at conversational distance.
     public static let targetHeight: Float = 0.45
 
-    private var path: [SIMD3<Float>] = []
-    private var pathIndex = 0
+    /// Locomotion is delegated: hopping is a spec 06 behavior with a foot-contact invariant,
+    /// and it is tested as pure state in `HopControllerTests` rather than through an entity.
+    public private(set) var hop = HopController()
+    /// Breathing, squash and bob run underneath every state.
+    public private(set) var animator = BirdAnimator()
     private var lookTarget: SIMD3<Float>?
 
     /// Metres per second taken from the walk clip's root motion. A fixed speed plus a chosen
@@ -120,6 +123,7 @@ public final class CharacterEntity {
     // MARK: - Placement
 
     public func place(at pose: Placement.Pose) {
+        hop.place(at: pose.position, yaw: pose.yaw)
         position = pose.position
         root.position = pose.position
         root.orientation = simd_quatf(angle: pose.yaw, axis: SIMD3(0, 1, 0))
@@ -131,9 +135,16 @@ public final class CharacterEntity {
     public func apply(_ resolved: ResolvedDirective) {
         switch resolved {
         case let .walk(path):
-            self.path = path
-            pathIndex = 0
             machine.handle(.pathAccepted)
+            if hop.follow(path: path) == .pathRejected {
+                // An unreachable walk fails to idle and speaks from where it stands; it never
+                // partially hops toward a wall (spec 06 §Locomotion).
+                machine.handle(.interrupted)
+            } else {
+                // Hops turn between arcs, on the ground, so there is no separate turn state
+                // to wait out.
+                machine.handle(.turnComplete)
+            }
             play(machine.state)
         case let .look(at: target):
             lookTarget = target
@@ -145,6 +156,7 @@ public final class CharacterEntity {
             machine.handle(.gestureStarted)
             play(.gesturing)
         case .idle:
+            hop.stop()
             machine.handle(.settled)
             play(.idle)
         case .unresolved:
@@ -165,45 +177,24 @@ public final class CharacterEntity {
     /// Called from a `SceneEvents.Update` subscription. Keeps all motion in one place so
     /// the frame cost is measurable.
     public func update(deltaTime: Float, userPosition: SIMD3<Float>) {
+        animator.update(deltaTime: deltaTime)
         advanceAlongPath(deltaTime: deltaTime)
         faceTarget(deltaTime: deltaTime, userPosition: userPosition)
     }
 
     private func advanceAlongPath(deltaTime: Float) {
-        guard machine.state == .walking || machine.state == .turning,
-              pathIndex < path.count else { return }
-
-        let target = path[pathIndex]
-        let delta = SIMD3(target.x - position.x, 0, target.z - position.z)
-        let distance = simd_length(delta)
-
-        // Turn first, then walk: the transition exists so the character does not crab
-        // sideways out of idle.
-        if machine.state == .turning {
-            let desired = atan2(delta.x, delta.z)
-            let current = currentYaw()
-            let step = shortestAngle(from: current, to: desired)
-            let maxStep = Float.pi * 1.5 * deltaTime
-            let applied = max(-maxStep, min(maxStep, step))
-            root.orientation = simd_quatf(angle: current + applied, axis: SIMD3(0, 1, 0))
-            if abs(step) < 0.08 { signal(.turnComplete) }
-            return
+        guard hop.isMoving else { return }
+        for event in hop.update(deltaTime: deltaTime) {
+            switch event {
+            case .takeoffAnticipated: animator.anticipate()
+            case .landed: animator.land()
+            case .pathCompleted: signal(.arrived); signal(.settled)
+            case .pathRejected: signal(.interrupted)
+            }
         }
-
-        if distance < 0.05 {
-            pathIndex += 1
-            if pathIndex >= path.count { signal(.arrived); signal(.settled) }
-            return
-        }
-
-        let step = min(distance, walkSpeed * deltaTime)
-        let direction = delta / max(distance, 1e-4)
-        position += direction * step
-        // Y comes from the path, which comes from the navmesh floor height. Feet contact a
-        // detected floor plane at all times; this is the line that enforces it.
-        position.y = target.y
-        root.position = position
-        root.orientation = simd_quatf(angle: atan2(direction.x, direction.z), axis: SIMD3(0, 1, 0))
+        position = hop.position
+        root.position = SIMD3(position.x, position.y + hop.bobHeight, position.z)
+        root.orientation = simd_quatf(angle: hop.yaw, axis: SIMD3(0, 1, 0))
     }
 
     private func faceTarget(deltaTime: Float, userPosition: SIMD3<Float>) {

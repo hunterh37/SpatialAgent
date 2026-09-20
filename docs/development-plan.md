@@ -70,6 +70,10 @@ most visible failure in the spec and it gets checked by eye on-device, not only 
 Test: `HopControllerTests` samples foot world position every frame across a full path and
 asserts horizontal foot movement is zero on every frame where that foot is grounded.
 
+Status: done — `HopController` (0.34s/4cm/9cm arc, anticipation crouch on `Body` not `Bob`,
+glide above 1.5m), `CharacterEntity` delegates path following; zero grounded foot slide at 90
+and 30fps.
+
 ### A4 — Face and expressions
 
 New: `Bird/FaceController.swift`, `Bird/Expression.swift`.
