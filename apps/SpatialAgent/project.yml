@@ -4,6 +4,11 @@ options:
   deploymentTarget:
     visionOS: "2.0"
   createIntermediateGroups: true
+
+packages:
+  SpatialAgentKit:
+    path: ../../packages
+
 targets:
   SpatialAgent:
     type: application
@@ -11,12 +16,42 @@ targets:
     sources:
       - path: Sources
       - path: Resources
+    dependencies:
+      - package: SpatialAgentKit
+        product: AgentKit
+      - package: SpatialAgentKit
+        product: AgentTransport
+      - package: SpatialAgentKit
+        product: CharacterKit
+      - package: SpatialAgentKit
+        product: SceneUnderstanding
+      - package: SpatialAgentKit
+        product: HomeBridge
+      - package: SpatialAgentKit
+        product: DesignSystem
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: SpatialAgent
+        UIApplicationSceneManifest:
+          UIApplicationPreferredDefaultSceneSessionRole: UIWindowSceneSessionRoleApplication
+          UIApplicationSupportsMultipleScenes: true
+        # Without these three, Bonjour browsing silently returns nothing and the
+        # ws:// connection is blocked by ATS (docs/architecture.md §2b, §2c).
+        NSLocalNetworkUsageDescription: >-
+          SpatialAgent connects to the Mac on your network that runs the model. Nothing
+          about your home leaves the LAN.
+        NSBonjourServices:
+          - _spatialagent._tcp
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        # ARKit plane detection needs this; scene mesh is never transmitted (spec/05-scene.md).
+        NSWorldSensingUsageDescription: >-
+          SpatialAgent uses the shape of your room so the character stands on the floor and
+          walks around furniture.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.medvr.SpatialAgent
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        INFOPLIST_KEY_CFBundleDisplayName: SpatialAgent
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "7"
         ENABLE_PREVIEWS: YES
