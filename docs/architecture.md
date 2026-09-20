@@ -10,13 +10,15 @@ SpatialAgent/
   packages/
     AgentKit/                agent loop, tool-calling protocol, transcript state
     AgentTransport/          networking: discovery, WebSocket/HTTP client, reconnect, codecs
-    AgentProtocol/           shared Codable wire types (imported by visionOS AND macOS)
+    AgentProtocol/           JSON Schema + generated Swift and Python wire types
     CharacterKit/            RealityKit entity, animation state machine, locomotion, gaze/IK
     SceneUnderstanding/      ARKit plane/mesh anchors -> navigable floor + placement rules
     HomeBridge/              HomeKit/Matter device model + intent execution
     DesignSystem/            shared SwiftUI components, ornaments, materials
   services/
-    agentd/                  local server (Python or Swift) in front of Ollama/vLLM
+    agentd/                  Python: agent loop, tool dispatch, model adapters
+      mocks/                 fake headset CLI, scenario fixtures, mock smart home
+      tests/                 pytest — runs headless on Linux CI
   docs/
 ```
 
@@ -68,12 +70,45 @@ construction, tool/function definitions, conversation memory, retries, and trans
 output into your own `AgentEvent` types. Swapping Ollama for vLLM, llama.cpp, or a cloud API
 then touches one file on the Mac and zero files in the app.
 
-Simplest viable `agentd`: FastAPI + a WebSocket endpoint, calling Ollama's `/api/chat` with
-`stream: true`. Roughly 200 lines. Write it in Python unless you want the Mac companion to
-be a single Swift binary, which is a real argument — one language, shared `AgentProtocol`
-via SwiftPM, no venv to explain to a teammate.
+**`agentd` is Python.** This is settled, and the reason is contributor access, not
+technology: a Python middle layer means teammates without a Mac can build, run, and test the
+entire agent brain — prompting, tool dispatch, memory, model swapping — on Linux or Windows,
+with no Xcode, no headset, and no Apple developer account. That is the majority of the
+interesting logic in this project. Restricting it to Swift would gate it behind hardware.
 
-## 3. Wire protocol sketch
+Stack: FastAPI + `websockets`, calling Ollama's `/api/chat` with `stream: true`. `uv` for
+dependency management. Roughly 200 lines to first token.
+
+The cost of choosing Python is that the wire types are no longer shared by the compiler.
+Section 3a is how that cost gets paid down.
+
+## 3. Wire protocol
+
+### 3a. Schema is the source of truth, not either language
+
+With a Swift client and a Python server, nothing stops the two definitions of a message from
+drifting until something fails at runtime on a headset — the worst place to debug.
+
+So neither language owns the protocol. `packages/AgentProtocol/schema/*.json` (JSON Schema)
+owns it, and both sides are generated from it:
+
+```
+packages/AgentProtocol/
+  schema/               *.json          <- hand-edited, the only place a field is defined
+  swift/                Generated/      <- codegen, committed, never hand-edited
+  python/agent_protocol/ models.py      <- codegen (datamodel-code-generator -> pydantic)
+```
+
+`make protocol` regenerates both. CI fails if regenerating produces a diff, so a schema
+change that skips codegen cannot merge. Committing the generated files matters: a Swift
+contributor must be able to open the project and build without installing Python, and a
+Python contributor without installing Swift.
+
+Pydantic on the server side is worth it beyond codegen — it validates every inbound message
+at the socket boundary, so a malformed `sceneUpdate` becomes a clear 400-style error rather
+than a `KeyError` three layers into the agent loop.
+
+### 3b. Message types
 
 Two enums, both `Codable`, both in `AgentProtocol`:
 
@@ -126,24 +161,64 @@ Make every tool call **confirmable**. A model that unlocks a door because of a
 misheard word is the failure mode worth designing against from the start. Classify tools as
 safe/unsafe; unsafe ones route through a confirmation ornament before execution.
 
-## 6. Build order
+## 6. The mock layer (how non-Mac contributors work)
 
-1. `AgentProtocol` + `agentd` echo server + a CLI client. No headset involved.
-2. Stream real Ollama tokens through it.
+This is infrastructure, not a nice-to-have. Without it, every change to the agent brain
+needs a headset to verify, and most of the team is blocked. Build it in week one, before the
+character work.
+
+Three pieces live in `services/agentd/mocks/`:
+
+**`fake_headset.py`** — a CLI that opens a real WebSocket to a real `agentd` and pretends to
+be Vision Pro. It sends `hello`, then reads typed user input and sends `userUtterance`, and
+renders whatever comes back: tokens print as they stream, `characterDirective` prints as
+`[character] walkTo(kitchen)`, `toolCall` prints and prompts for a fake result. A contributor
+on Windows can hold a full conversation with the agent and watch the character *logic* run
+in a terminal. The headset becomes a renderer for behavior that was already verified.
+
+**`scenarios/*.yaml`** — recorded and hand-written fixtures of the world state the headset
+would send: room layouts with named anchors (`kitchen`, `desk`, `couch`), floor planes, and
+smart-home device lists. `fake_headset.py --scenario apartment.yaml` boots the agent into a
+plausible room. This is also what makes `walkTo` testable — the agent's navigation intent can
+be asserted against a known floor plan with no ARKit involved.
+
+**`mock_home.py`** — an in-memory `HomeBridge` implementing the same tool list as the real
+HomeKit one, with state you can inspect. Tool calls mutate a dict, and tests assert on it.
+
+Two rules keep the mock honest:
+
+1. The mock talks to `agentd` over the **real socket, with the real schema**. It is not a
+   function-call shortcut past the transport. A mock that bypasses the wire stops catching
+   wire bugs, which are exactly the bugs that only appear on-device.
+2. Every scenario fixture is generated *or* validated against the same JSON Schema as live
+   traffic, so a fixture cannot encode a message shape the client would never send.
+
+Pytest then runs the whole agent loop headless in CI on Linux: scenario in, assert on the
+sequence of `ServerEvent`s out. Character behavior becomes a unit test.
+
+Recording is worth adding early too — the visionOS app writes its session's raw frames to a
+`.jsonl` file, and `fake_headset.py --replay session.jsonl` plays them back into `agentd`.
+A bug seen once in the headset becomes a fixture that reproduces it on anyone's laptop.
+
+## 7. Build order
+
+1. `AgentProtocol` schema + codegen for both languages + `make protocol` + the CI diff check.
+2. `agentd` echo server + `fake_headset.py`, then real streaming Ollama tokens through it.
 3. visionOS app: Bonjour discovery, connect, print tokens into a window.
 4. `CharacterKit` with a placeholder capsule, driven by hardcoded directives.
 5. Swap capsule for the rigged USDZ.
 6. `SceneUnderstanding` floor detection -> real `walkTo`.
 7. `HomeBridge` with one read-only tool, then one write tool with confirmation.
 
-Steps 1–2 are testable in a terminal, which is where you want to spend the debugging time.
+Steps 1–2 are the whole platform for everyone without a headset, which is why they come
+first. Steps 3–6 are the only ones that require a Mac.
 
-## 7. Two things worth deciding early
+## 8. Two things worth deciding early
 
 **Where does conversation state live?** Recommendation: on the Mac, in `agentd`. The headset
 becomes stateless and reconnects cleanly mid-conversation after the inevitable sleep/wake.
 
-**Swift or Python for `agentd`?** Python is faster to start and has the better model-serving
-ecosystem. Swift gives you one language and a literally shared protocol type, so a wire
-change becomes a compile error instead of a runtime surprise. For a project whose main risk
-is client/server drift, that argument is stronger than it first looks.
+**How much logic is allowed on the headset?** As little as possible, and the test is
+concrete: if a behavior cannot be exercised by `fake_headset.py`, it is in the wrong place.
+Rendering, hand/gaze input, ARKit anchors and animation blending belong on-device. Anything
+that decides *what the character does* belongs in Python, where the whole team can reach it.
