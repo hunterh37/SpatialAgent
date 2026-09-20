@@ -1,5 +1,6 @@
 import AgentProtocol
 import Foundation
+import SpatialMemory
 import simd
 
 /// Abstract scene source, so `AgentKit` and previews can run against a fixture room while
@@ -17,8 +18,13 @@ public protocol SceneProviding: AnyObject {
     var onMeshChanged: ((NavMesh) -> Void)? { get set }
 }
 
+/// The fixture room has no world tracking, so every anchor it hands out is a plain UUID that
+/// is immediately "relocalized". That keeps fixture-backed records navigable without
+/// pretending the fixture has an ARKit session.
 @MainActor
-public final class FixtureSceneProvider: SceneProviding {
+public final class FixtureSceneProvider: SceneProviding, AnchorProviding {
+    public var onAnchorUpdate: ((UUID, SIMD3<Float>?) -> Void)?
+
     public var navMesh: NavMesh?
     public var userPosition: SIMD3<Float>
     public var userForward: SIMD3<Float>
@@ -49,6 +55,16 @@ public final class FixtureSceneProvider: SceneProviding {
     }
 
     public func stop() {}
+
+    public func addAnchor(at position: SIMD3<Float>) async -> UUID? {
+        let id = UUID()
+        onAnchorUpdate?(id, position)
+        return id
+    }
+
+    public func removeAnchor(id: UUID) async {
+        onAnchorUpdate?(id, nil)
+    }
 }
 
 #if os(visionOS)
@@ -61,7 +77,7 @@ import QuartzCore
 /// places, bounds and a floor area — abstractions — never camera frames or raw meshes. The
 /// reduction to `FloorRect` happens on-device and is the boundary that guarantees it.
 @MainActor
-public final class ARKitSceneProvider: SceneProviding {
+public final class ARKitSceneProvider: SceneProviding, AnchorProviding {
     public private(set) var navMesh: NavMesh?
     public private(set) var userPosition: SIMD3<Float> = .zero
     public private(set) var userForward: SIMD3<Float> = SIMD3(0, 0, -1)
@@ -74,6 +90,7 @@ public final class ARKitSceneProvider: SceneProviding {
     private var floors: [UUID: FloorRect] = [:]
     private var obstacles: [UUID: FloorRect] = [:]
     private var rebuildTask: Task<Void, Never>?
+    private var knownAnchors: [UUID: WorldAnchor] = [:]
 
     public init() {}
 
@@ -90,11 +107,26 @@ public final class ARKitSceneProvider: SceneProviding {
         }
         Task { await consumePlanes() }
         Task { await trackUser() }
+        Task { await consumeWorldAnchors() }
     }
 
     public func stop() {
         rebuildTask?.cancel()
         session.stop()
+    }
+
+    /// Fires as world anchors relocalize, move, or are lost. `AnchorBinding` subscribes and
+    /// writes the result into the map's cached transforms (spec 07 §Model).
+    public var onAnchorUpdate: ((UUID, SIMD3<Float>?) -> Void)?
+
+    public func removeAnchor(id: UUID) async {
+        guard let anchor = knownAnchors[id] else { return }
+        try? await worldTracking.removeAnchor(anchor)
+        knownAnchors[id] = nil
+    }
+
+    public func addAnchor(at position: SIMD3<Float>) async -> UUID? {
+        await anchorPlace(at: position)
     }
 
     /// Persists a named place against a world anchor so it survives the session.
@@ -105,9 +137,32 @@ public final class ARKitSceneProvider: SceneProviding {
         let anchor = WorldAnchor(originFromAnchorTransform: transform)
         do {
             try await worldTracking.addAnchor(anchor)
+            knownAnchors[anchor.id] = anchor
             return anchor.id
         } catch {
             return nil
+        }
+    }
+
+    /// Relocalization is the whole reason a taught place lands in the same physical spot
+    /// after a relaunch, so the stream is consumed for the life of the session rather than
+    /// polled at launch.
+    private func consumeWorldAnchors() async {
+        for await update in worldTracking.anchorUpdates {
+            let anchor = update.anchor
+            switch update.event {
+            case .added, .updated:
+                knownAnchors[anchor.id] = anchor
+                guard anchor.isTracked else {
+                    onAnchorUpdate?(anchor.id, nil)
+                    continue
+                }
+                let m = anchor.originFromAnchorTransform
+                onAnchorUpdate?(anchor.id, SIMD3(m.columns.3.x, m.columns.3.y, m.columns.3.z))
+            case .removed:
+                knownAnchors[anchor.id] = nil
+                onAnchorUpdate?(anchor.id, nil)
+            }
         }
     }
 

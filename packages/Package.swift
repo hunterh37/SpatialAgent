@@ -28,7 +28,7 @@ let package = Package(
         .target(name: "AgentTransport", dependencies: ["AgentProtocol"], swiftSettings: swift5),
         .target(
             name: "SceneUnderstanding",
-            dependencies: ["AgentProtocol"],
+            dependencies: ["AgentProtocol", "SpatialMemory"],
             swiftSettings: swift5
         ),
         // The map is user data with a persistence and privacy story; the scene module is
@@ -57,7 +57,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SceneUnderstandingTests",
-            dependencies: ["SceneUnderstanding"],
+            dependencies: ["SceneUnderstanding", "SpatialMemory"],
             swiftSettings: swift5
         ),
         .testTarget(

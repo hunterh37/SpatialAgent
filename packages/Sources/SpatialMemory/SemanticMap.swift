@@ -12,12 +12,12 @@ public struct SemanticMap: Codable, Hashable, Sendable {
     /// key exists now so that persistence does not have to be rewritten when they do.
     public var roomId: String
 
-    public private(set) var places: [Place] = []
-    public private(set) var objects: [MapObject] = []
-    public private(set) var rules: [Rule] = []
-    public private(set) var activities: [Activity] = []
+    public internal(set) var places: [Place] = []
+    public internal(set) var objects: [MapObject] = []
+    public internal(set) var rules: [Rule] = []
+    public internal(set) var activities: [Activity] = []
     /// Append-only.
-    public private(set) var episodes: [Episode] = []
+    public internal(set) var episodes: [Episode] = []
 
     public init(roomId: String = "default") {
         self.roomId = roomId

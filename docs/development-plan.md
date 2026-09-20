@@ -187,6 +187,11 @@ spot.
 Test: `AnchorBindingTests` with a mocked provider covers relocalize-updates-cache, and
 never-relocalized-is-non-navigable.
 
+Status: done — `AnchorProviding` in `SpatialMemory`, `AnchorBinding` writing relocalizations
+into every record on an anchor and persisting them, lost anchors flagged non-navigable without
+moving the record, orphaned anchors released. `ARKitSceneProvider` now consumes
+`worldTracking.anchorUpdates`; `FixtureSceneProvider` anchors trivially.
+
 ### B3 — Forbidden zones in the navmesh
 
 Modifies: `SceneUnderstanding/NavMesh.swift`.
