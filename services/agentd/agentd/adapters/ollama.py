@@ -34,16 +34,18 @@ class OllamaAdapter:
         if tools:
             body["tools"] = tools
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            async with client.stream("POST", f"{self._base_url}/api/chat", json=body) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.strip():
-                        continue
-                    payload = json.loads(line)
-                    message = payload.get("message") or {}
-                    yield Chunk(
-                        text=message.get("content", ""),
-                        tool_calls=message.get("tool_calls", []) or [],
-                        done=bool(payload.get("done")),
-                    )
+        async with (
+            httpx.AsyncClient(timeout=self._timeout) as client,
+            client.stream("POST", f"{self._base_url}/api/chat", json=body) as resp,
+        ):
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.strip():
+                    continue
+                payload = json.loads(line)
+                message = payload.get("message") or {}
+                yield Chunk(
+                    text=message.get("content", ""),
+                    tool_calls=message.get("tool_calls", []) or [],
+                    done=bool(payload.get("done")),
+                )

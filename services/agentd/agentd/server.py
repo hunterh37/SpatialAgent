@@ -1,7 +1,13 @@
-"""WebSocket server. One persistent socket per headset; messages multiplexed by `type`."""
+"""WebSocket server. One persistent socket per headset; messages multiplexed by `type`.
+
+Reads and writes run as separate tasks over one outbound queue, because the server has to be
+able to speak unprompted: an ambient event arrives from the home, not from a request
+(PRD 4). A read/reply loop structurally cannot do that.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -9,9 +15,11 @@ import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from .adapters import EchoAdapter, ModelAdapter, OllamaAdapter
+from .adapters import EchoAdapter, ModelAdapter, OllamaAdapter, OpenAICompatAdapter
+from .executors import ClientExecutor, ServerExecutor, ToolExecutor
 from .protocol import (
     PROTOCOL_VERSION,
+    ConfirmationResult,
     DeviceStates,
     Error,
     Hello,
@@ -24,7 +32,7 @@ from .protocol import (
     UserUtterance,
     parse_client_message,
 )
-from .session import Session
+from .session import Session, SessionStore
 from .tools import default_registry
 
 log = logging.getLogger("agentd")
@@ -34,29 +42,70 @@ def build_adapter() -> ModelAdapter:
     backend = os.environ.get("AGENTD_BACKEND", "ollama")
     if backend == "echo":
         return EchoAdapter(delay=float(os.environ.get("AGENTD_ECHO_DELAY", "0.02")))
+    if backend in {"openai", "openai-compat", "llamacpp", "lmstudio", "vllm"}:
+        return OpenAICompatAdapter(
+            model=os.environ.get("AGENTD_MODEL", "local-model"),
+            base_url=os.environ.get("OPENAI_BASE_URL", "http://127.0.0.1:1234/v1"),
+            api_key=os.environ.get("OPENAI_API_KEY", "not-needed"),
+        )
     return OllamaAdapter(
         model=os.environ.get("AGENTD_MODEL", "llama3.2"),
         base_url=os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434"),
     )
 
 
-def create_app(adapter: ModelAdapter | None = None) -> FastAPI:
-    app = FastAPI(title="agentd", version="0.1.0")
+def build_executor() -> ToolExecutor:
+    """`AGENTD_HOME=mock` executes here; the default leaves execution to the client.
+
+    HomeKit is absent from the visionOS SDK, so the shipping answer is a macOS companion
+    plugged in here as another `HomeExecutor` (docs/middle-layer-todo.md 1).
+    """
+    mode = os.environ.get("AGENTD_HOME", "client")
+    if mode == "mock":
+        from mocks.mock_home import MockHome
+        from mocks.scenario import Scenario
+
+        scenario = Scenario.load(os.environ.get("AGENTD_SCENARIO", "apartment"))
+        return ServerExecutor(MockHome(scenario.devices))
+    return ClientExecutor()
+
+
+def create_app(
+    adapter: ModelAdapter | None = None,
+    executor: ToolExecutor | None = None,
+) -> FastAPI:
+    app = FastAPI(title="agentd", version="0.2.0")
     adapter = adapter or build_adapter()
+    executor = executor or build_executor()
     tools = default_registry()
+    store = SessionStore()
+    app.state.sessions = store
 
     @app.get("/health")
     async def health() -> dict[str, object]:
-        return {"ok": True, "model": adapter.name, "protocolVersion": PROTOCOL_VERSION}
+        return {
+            "ok": True,
+            "model": adapter.name,
+            "protocolVersion": PROTOCOL_VERSION,
+            "toolExecution": executor.location,
+            "sessions": len(store),
+        }
 
     @app.websocket("/agent")
     async def agent(ws: WebSocket) -> None:
         await ws.accept()
-        session = Session(adapter, tools)
-        log.info("session %s opened", session.id)
+        outbound: asyncio.Queue[ServerEvent] = asyncio.Queue()
+        session: Session | None = None
 
-        async def send(event: ServerEvent) -> None:
-            await ws.send_text(event.model_dump_json())
+        async def writer() -> None:
+            while True:
+                event = await outbound.get()
+                await ws.send_text(event.model_dump_json())
+
+        writer_task = asyncio.create_task(writer())
+
+        def emit(event: ServerEvent) -> None:
+            outbound.put_nowait(event)
 
         try:
             while True:
@@ -71,43 +120,87 @@ def create_app(adapter: ModelAdapter | None = None) -> FastAPI:
 
                 if isinstance(message, Hello):
                     if message.protocolVersion != PROTOCOL_VERSION:
-                        await send(
+                        # Sent directly, not queued: the socket closes on the next line.
+                        await ws.send_text(
                             Error(
                                 code="protocol_version_mismatch",
                                 message=(
                                     f"server speaks v{PROTOCOL_VERSION}, "
                                     f"client sent v{message.protocolVersion}"
                                 ),
-                            )
+                            ).model_dump_json()
                         )
                         await ws.close(code=1002)
                         return
-                    await send(Ready(sessionId=session.id, model=adapter.name))
 
-                elif isinstance(message, SceneUpdate):
+                    resumed = store.get(message.sessionId)
+                    session = resumed or store.put(
+                        Session(adapter, tools, executor, session_id=message.sessionId or None)
+                    )
+                    session.touch()
+                    log.info(
+                        "session %s %s (%s)",
+                        session.id,
+                        "resumed" if resumed else "opened",
+                        message.client,
+                    )
+                    emit(
+                        Ready(
+                            sessionId=session.id,
+                            model=adapter.name,
+                            capabilities=session.capabilities(),
+                            resumed=resumed is not None,
+                        )
+                    )
+                    continue
+
+                if isinstance(message, Ping):
+                    # Keepalive is not conversation: it works before hello.
+                    emit(Pong())
+                    continue
+
+                if session is None:
+                    emit(Error(code="hello_required", message="send hello before anything else"))
+                    continue
+
+                if isinstance(message, SceneUpdate):
                     session.update_scene(message.scene)
 
                 elif isinstance(message, DeviceStates):
-                    session.update_devices(message.devices)
+                    for event in session.update_devices(message.devices):
+                        session.note_ambient(event)
+                        emit(event)
 
                 elif isinstance(message, ToolResult):
-                    session.resolve_tool_result(message)
+                    if not session.resolve_tool_result(message):
+                        log.warning("toolResult for unknown call %s", message.callId)
 
-                elif isinstance(message, Ping):
-                    await send(Pong())
+                elif isinstance(message, ConfirmationResult):
+                    if not session.resolve_confirmation(message.callId, message.approved):
+                        log.warning("confirmation for unknown call %s", message.callId)
 
                 elif isinstance(message, UserUtterance):
-                    try:
-                        async for event in session.handle_utterance(message.id, message.text):
-                            await send(event)
-                    except Exception as exc:  # surfaced in character, never a silent no-op
-                        log.exception("utterance failed")
-                        await send(Error(code="agent_error", message=str(exc)))
+                    # A turn runs concurrently with reading, so a toolResult or a
+                    # confirmation sent mid-turn can actually arrive.
+                    asyncio.create_task(_run_turn(session, message, emit))
 
         except WebSocketDisconnect:
-            log.info("session %s closed", session.id)
-
-
-
+            if session is not None:
+                log.info("session %s socket closed (state kept for resume)", session.id)
+        finally:
+            writer_task.cancel()
+            if session is not None:
+                session.pending.cancel_all()
 
     return app
+
+
+async def _run_turn(session: Session, message: UserUtterance, emit) -> None:
+    try:
+        async for event in session.handle_utterance(message.id, message.text, message.isFinal):
+            emit(event)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # surfaced in character, never a silent no-op
+        log.exception("utterance failed")
+        emit(Error(code="agent_error", message=str(exc)))

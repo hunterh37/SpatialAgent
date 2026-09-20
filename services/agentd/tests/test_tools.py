@@ -18,7 +18,7 @@ def test_unknown_tool_fails_closed() -> None:
 def test_mock_home_mutates_state() -> None:
     scenario = Scenario.load("apartment")
     home = MockHome(scenario.devices)
-    ok, payload, error = home.execute("set_light", {"device_id": "light.kitchen", "on": False})
+    ok, _payload, error = home.execute("set_light", {"device_id": "light.kitchen", "on": False})
     assert ok and error is None
     assert home.devices["light.kitchen"].state["on"] is False
 

@@ -11,6 +11,9 @@ from typing import Any
 
 from ..protocol import Safety
 
+# Handled by the session itself, not by any executor: it asks the user a question.
+ASK_FOR_PLACE = "ask_for_place"
+
 
 @dataclass(frozen=True)
 class Tool:
@@ -81,6 +84,15 @@ def default_registry() -> ToolRegistry:
                     "on": {"type": "boolean", "required": True},
                     "brightness": {"type": "integer"},
                 },
+            ),
+            Tool(
+                name=ASK_FOR_PLACE,
+                description=(
+                    "Ask the user to name a place in the room that you need but do not have, "
+                    "e.g. 'kitchen'. Use this instead of guessing a location."
+                ),
+                safety="safe",
+                parameters={"name": {"type": "string", "required": True}},
             ),
             Tool(
                 name="set_lock",

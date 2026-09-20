@@ -34,6 +34,8 @@ public actor WebSocketAgentChannel: AgentChannel {
     private var task: URLSessionWebSocketTask?
     private var endpoint: AgentEndpoint?
     private var attempt = 0
+    /// Offered back in the next `hello` so the server resumes rather than restarts.
+    private var lastSessionId: String?
     private var shouldReconnect = true
     private var recorder: SessionRecorder?
 
@@ -86,7 +88,15 @@ public actor WebSocketAgentChannel: AgentChannel {
 
         // `hello` is always the first frame. A version mismatch closes the socket with a
         // stated reason rather than failing obscurely later (spec/03-protocol.md).
-        await send(.hello(protocolVersion: Wire.protocolVersion, client: clientDescription()))
+        // The last session id is offered back so a sleep/wake resumes the conversation on
+        // the server rather than silently restarting it (spec/03-protocol.md).
+        await send(
+            .hello(
+                protocolVersion: Wire.protocolVersion,
+                client: clientDescription(),
+                sessionId: lastSessionId
+            )
+        )
         Task { await receiveLoop(task) }
     }
 
@@ -126,7 +136,10 @@ public actor WebSocketAgentChannel: AgentChannel {
                 log.debug("ignored unknown event")
                 return
             }
-            if case .ready = event { attempt = 0 }
+            if case let .ready(sessionId, _, _, _, _) = event {
+                attempt = 0
+                lastSessionId = sessionId
+            }
             continuation.yield(event)
         } catch {
             log.error("undecodable frame dropped: \(String(describing: error), privacy: .public)")

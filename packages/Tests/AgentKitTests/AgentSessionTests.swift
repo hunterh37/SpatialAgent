@@ -63,7 +63,7 @@ final class AgentSessionTests: XCTestCase {
 
     func testReadyPublishesDeviceAndSceneSnapshots() async {
         let (session, channel) = makeSession(home: MockHomeProvider())
-        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "llama3.2"))
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "llama3.2", capabilities: Capabilities(), resumed: false))
         await settle()
 
         XCTAssertTrue(session.connection.isConnected)
@@ -73,7 +73,7 @@ final class AgentSessionTests: XCTestCase {
 
     func testProtocolVersionMismatchFailsWithAStatedReason() async {
         let (session, channel) = makeSession(home: MockHomeProvider())
-        channel.emit(.ready(sessionId: "s1", protocolVersion: 99, model: "x"))
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 99, model: "x", capabilities: Capabilities(), resumed: false))
         await settle()
 
         guard case let .failed(reason) = session.connection else {
@@ -84,13 +84,13 @@ final class AgentSessionTests: XCTestCase {
 
     func testTokensStreamIntoTheReply() async {
         let (session, channel) = makeSession(home: MockHomeProvider())
-        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m"))
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(), resumed: false))
         await settle()
         session.send(utterance: "turn off the kitchen light")
         await settle()
 
         let id = channel.sent.compactMap { message -> String? in
-            if case let .userUtterance(id, _) = message { return id }
+            if case let .userUtterance(id, _, _) = message { return id }
             return nil
         }.last!
 
@@ -115,14 +115,14 @@ final class AgentSessionTests: XCTestCase {
     func testSafeToolExecutesWithoutConfirmation() async throws {
         let home = MockHomeProvider()
         let (session, channel) = makeSession(home: home)
-        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m"))
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(), resumed: false))
         await settle()
 
         channel.emit(
             .toolCall(
                 callId: "t1", name: "set_light",
                 args: ["device_id": .string("light.desk"), "on": .bool(true)],
-                safety: .safe
+                safety: .safe, executedBy: .client
             )
         )
         await settle()
@@ -139,14 +139,14 @@ final class AgentSessionTests: XCTestCase {
     func testUnsafeToolBlocksUntilConfirmed() async throws {
         let home = MockHomeProvider()
         let (session, channel) = makeSession(home: home)
-        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m"))
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(), resumed: false))
         await settle()
 
         channel.emit(
             .toolCall(
                 callId: "t2", name: "set_lock",
                 args: ["device_id": .string("lock.front"), "locked": .bool(false)],
-                safety: .unsafe
+                safety: .unsafe, executedBy: .client
             )
         )
         await settle()
@@ -172,14 +172,14 @@ final class AgentSessionTests: XCTestCase {
     func testServerAssertedSafeOnALockStillRequiresConfirmation() async {
         let home = MockHomeProvider()
         let (session, channel) = makeSession(home: home)
-        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m"))
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(), resumed: false))
         await settle()
 
         channel.emit(
             .toolCall(
                 callId: "t3", name: "set_lock",
                 args: ["device_id": .string("lock.front"), "locked": .bool(false)],
-                safety: .safe
+                safety: .safe, executedBy: .client
             )
         )
         await settle()
@@ -193,14 +193,14 @@ final class AgentSessionTests: XCTestCase {
     func testCancelledConfirmationReportsFailureAndLeavesDeviceAlone() async {
         let home = MockHomeProvider()
         let (session, channel) = makeSession(home: home)
-        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m"))
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(), resumed: false))
         await settle()
 
         channel.emit(
             .toolCall(
                 callId: "t4", name: "set_lock",
                 args: ["device_id": .string("lock.front"), "locked": .bool(false)],
-                safety: .unsafe
+                safety: .unsafe, executedBy: .client
             )
         )
         await settle()
@@ -218,11 +218,137 @@ final class AgentSessionTests: XCTestCase {
         )
     }
 
+    // MARK: Server-side execution (docs/middle-layer-todo.md §1)
+
+    /// HomeKit is absent from the visionOS SDK, so the Mac executes. The headset's whole
+    /// job is asking a human, and it must never claim to have acted.
+    func testServerExecutedToolSendsApprovalNotAToolResult() async {
+        let home = MockHomeProvider()
+        let (session, channel) = makeSession(home: home)
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(), resumed: false))
+        await settle()
+
+        channel.emit(
+            .toolCall(
+                callId: "t9", name: "set_lock",
+                args: ["device_id": .string("lock.front"), "locked": .bool(false)],
+                safety: .unsafe, executedBy: .server
+            )
+        )
+        await settle()
+        XCTAssertEqual(session.confirmations.pending.count, 1)
+
+        session.confirmations.confirm("t9")
+        await settle()
+
+        XCTAssertTrue(channel.sent.contains { message in
+            if case let .confirmationResult(callId, approved) = message {
+                return callId == "t9" && approved
+            }
+            return false
+        })
+        XCTAssertFalse(channel.sent.contains { message in
+            if case let .toolResult(callId, _, _, _) = message { return callId == "t9" }
+            return false
+        })
+        // The client did not touch the device; the server owns execution.
+        XCTAssertEqual(
+            home.devices.first { $0.id == "lock.front" }?.state?["locked"]?.boolValue, true
+        )
+    }
+
+    func testDeclinedServerExecutedToolSendsRefusal() async {
+        let (session, channel) = makeSession(home: MockHomeProvider())
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(), resumed: false))
+        await settle()
+
+        channel.emit(
+            .toolCall(
+                callId: "t10", name: "set_lock",
+                args: ["device_id": .string("lock.front"), "locked": .bool(false)],
+                safety: .unsafe, executedBy: .server
+            )
+        )
+        await settle()
+        session.confirmations.cancel("t10")
+        await settle()
+
+        XCTAssertTrue(channel.sent.contains { message in
+            if case let .confirmationResult(callId, approved) = message {
+                return callId == "t10" && !approved
+            }
+            return false
+        })
+    }
+
+    // MARK: Ambient and place requests
+
+    func testAmbientEventWithNowInterruptSpeaksImmediately() async {
+        let (session, channel) = makeSession(home: MockHomeProvider())
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(ambientEvents: true), resumed: false))
+        await settle()
+
+        channel.emit(
+            .ambientEvent(
+                source: "sensor.doorbell", kind: .doorbell, interrupt: .now,
+                text: "Someone is at the door."
+            )
+        )
+        await settle()
+
+        XCTAssertEqual(session.lastAmbient?.kind, .doorbell)
+        XCTAssertEqual(session.transcript.last?.text, "Someone is at the door.")
+    }
+
+    /// `silent` updates state and says nothing: a light changing is not worth a sentence.
+    func testSilentAmbientEventDoesNotSpeak() async {
+        let (session, channel) = makeSession(home: MockHomeProvider())
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(ambientEvents: true), resumed: false))
+        await settle()
+
+        channel.emit(
+            .ambientEvent(
+                source: "light.kitchen", kind: .stateChange, interrupt: .silent, text: "on"
+            )
+        )
+        await settle()
+
+        XCTAssertEqual(session.lastAmbient?.interrupt, .silent)
+        XCTAssertTrue(session.transcript.isEmpty)
+    }
+
+    func testRequestPlaceIsAskedInCharacter() async {
+        let (session, channel) = makeSession(home: MockHomeProvider())
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(requestPlace: true), resumed: false))
+        await settle()
+
+        channel.emit(.requestPlace(name: "kitchen", prompt: "Where's the kitchen?"))
+        await settle()
+
+        XCTAssertEqual(session.placeRequest?.name, "kitchen")
+        XCTAssertEqual(session.transcript.last?.text, "Where's the kitchen?")
+    }
+
+    func testCapabilitiesAreReadFromReady() async {
+        let (session, channel) = makeSession(home: MockHomeProvider())
+        channel.emit(
+            .ready(
+                sessionId: "s1", protocolVersion: 1, model: "m",
+                capabilities: Capabilities(ambientEvents: true, toolExecution: .server),
+                resumed: false
+            )
+        )
+        await settle()
+
+        XCTAssertEqual(session.capabilities.toolExecution, .server)
+        XCTAssertTrue(session.capabilities.ambientEvents)
+    }
+
     func testUnknownPlaceDirectiveSpeaksInsteadOfMoving() async {
         let (session, channel) = makeSession(home: MockHomeProvider())
         let scene = FixtureSceneProvider.apartment()
         session.attach(scene: scene)
-        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m"))
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(), resumed: false))
         await settle()
 
         channel.emit(.characterDirective(CharacterDirective(kind: .walkTo, place: "conservatory")))

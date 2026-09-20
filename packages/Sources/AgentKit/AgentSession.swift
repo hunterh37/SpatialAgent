@@ -23,6 +23,12 @@ public final class AgentSession: ObservableObject {
     @Published public private(set) var transcript: [TranscriptEntry] = []
     @Published public private(set) var characterState: CharacterState = .idle
     @Published public private(set) var lastResolved: ResolvedDirective?
+    /// What the server said it can do, read from `ready` rather than discovered by failure.
+    @Published public private(set) var capabilities = Capabilities()
+    /// Last ambient event the home pushed unprompted (PRD §4).
+    @Published public private(set) var lastAmbient: AmbientNotice?
+    /// Set when the agent asks the user to name a place; cleared once it is named.
+    @Published public private(set) var placeRequest: PlaceRequest?
 
     public let confirmations = ConfirmationGate()
     public let places: NamedPlaceStore
@@ -112,7 +118,7 @@ public final class AgentSession: ObservableObject {
         // React before the answer exists. The 400ms budget in PRD §6 is met here, not after
         // the model responds: the character enters `thinking` on send.
         signal(.utteranceEnded)
-        Task { await channel.send(.userUtterance(id: id, text: trimmed)) }
+        Task { await channel.send(.userUtterance(id: id, text: trimmed, isFinal: true)) }
     }
 
     /// Called when the user's gaze lands on the character, or the field takes focus.
@@ -137,13 +143,17 @@ public final class AgentSession: ObservableObject {
 
     private func handle(_ event: ServerEvent) async {
         switch event {
-        case let .ready(sessionId, version, model):
+        case let .ready(sessionId, version, model, capabilities, resumed):
             guard version == Wire.protocolVersion else {
                 connection = .failed("Protocol v\(version) from server, client speaks v\(Wire.protocolVersion).")
                 await channel.disconnect()
                 return
             }
+            self.capabilities = capabilities
             connection = .connected(sessionId: sessionId, model: model)
+            // A resumed session is mid-thought: the character picks up attention rather
+            // than starting from cold idle.
+            if resumed { signal(.addressed) }
             // Full snapshot on connect; deltas after.
             publishDevices()
             sendSceneUpdate(floorArea: scene?.navMesh?.floorArea)
@@ -165,8 +175,32 @@ public final class AgentSession: ObservableObject {
         case let .characterDirective(directive):
             apply(directive)
 
-        case let .toolCall(callId, name, args, safety):
-            await runTool(callId: callId, name: name, args: args, serverSafety: safety)
+        case let .toolCall(callId, name, args, safety, executedBy):
+            await runTool(
+                callId: callId,
+                name: name,
+                args: args,
+                serverSafety: safety,
+                executedBy: executedBy
+            )
+
+        case let .ambientEvent(source, kind, interrupt, text):
+            lastAmbient = AmbientNotice(
+                source: source, kind: kind, interrupt: interrupt, text: text
+            )
+            // The server classified the urgency; the client only decides the rendering.
+            switch interrupt {
+            case .now:
+                speakInCharacter(text)
+            case .passing:
+                if case .idle = characterState { speakInCharacter(text) }
+            case .silent:
+                break
+            }
+
+        case let .requestPlace(name, prompt):
+            placeRequest = PlaceRequest(name: name, prompt: prompt)
+            speakInCharacter(prompt)
 
         case let .error(code, message):
             if code == "disconnected" { connection = .reconnecting(attempt: 1) }
@@ -200,10 +234,30 @@ public final class AgentSession: ObservableObject {
         callId: String,
         name: String,
         args: JSONObject?,
-        serverSafety: Safety
+        serverSafety: Safety,
+        executedBy: Executor
     ) async {
         // Client-enforced, independent of what the server asserted. Stricter wins.
         let safety = ToolSafety.effective(name: name, serverAsserted: serverSafety)
+
+        // Server-executed: this client's whole job is asking a human. It never reports
+        // having acted, because it did not (docs/middle-layer-todo.md §1).
+        if executedBy == .server {
+            guard safety == .unsafe else { return }
+            let device = home.devices.first { $0.id == args?["device_id"]?.stringValue }
+            let summary = ConfirmationGate.summarize(tool: name, args: args, device: device)
+            let outcome = await confirmations.request(
+                callId: callId,
+                toolName: name,
+                deviceName: device?.name ?? "device",
+                summary: summary
+            )
+            await channel.send(
+                .confirmationResult(callId: callId, approved: outcome == .confirmed)
+            )
+            if outcome != .confirmed { speakInCharacter("Okay — leaving that alone.") }
+            return
+        }
 
         if safety == .unsafe {
             let device = home.devices.first { $0.id == args?["device_id"]?.stringValue }
@@ -260,6 +314,22 @@ public final class AgentSession: ObservableObject {
         signalSink?(event)
         characterState = machine.handle(event)
     }
+}
+
+/// An ambient push, kept so a view can render it after the character has spoken.
+public struct AmbientNotice: Identifiable, Hashable, Sendable {
+    public let id = UUID()
+    public let source: String
+    public let kind: AmbientKind
+    public let interrupt: AmbientInterrupt
+    public let text: String
+}
+
+/// The agent asking for a place it does not have. Cleared when `places` gains that name.
+public struct PlaceRequest: Identifiable, Hashable, Sendable {
+    public let id = UUID()
+    public let name: String
+    public let prompt: String
 }
 
 public struct TranscriptEntry: Identifiable, Hashable, Sendable {

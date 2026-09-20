@@ -1,3 +1,3 @@
-from .registry import Tool, ToolRegistry, default_registry
+from .registry import ASK_FOR_PLACE, Tool, ToolRegistry, default_registry
 
-__all__ = ["Tool", "ToolRegistry", "default_registry"]
+__all__ = ["ASK_FOR_PLACE", "Tool", "ToolRegistry", "default_registry"]

@@ -1,184 +1,138 @@
 # What the middle layer still has to do
 
 Written from the visionOS side, after building it. Everything here is work in `agentd`,
-`packages/AgentProtocol/schema/`, or the Mac companion — nothing in this document is a
-visionOS task. Each item states what the client already does, what it needs back, and what
-breaks today without it.
+`packages/AgentProtocol/schema/`, or the Mac companion.
 
-The client is built to the protocol as it stands, so `agentd` as it exists today will drive
-it end to end. The items below are what the client cannot reach *past* v0.1.
+**Status: phase 2 landed.** Items 2–7 and most of 8 are implemented; each section below now
+states what shipped and what is left. Item 1 is half done — the protocol split and the
+executor boundary exist, the HomeKit executor does not, because it needs a macOS target.
 
 ---
 
 ## 1. HomeKit is not available on visionOS — execution has to move to the Mac
 
-**Blocking. Decide this before any more home work lands on either side.**
+**Partly done. The remaining half needs a macOS app target, not a protocol change.**
 
-`docs/architecture.md` §5 says execution should run on-device "because HomeKit authorization
-already lives with the user's session." That is true on iOS and macOS. The HomeKit framework
-is not in the visionOS SDK, so the on-device option does not exist. `HomeKitBridge.swift` is
-written and compiled out behind `#if canImport(HomeKit) && !os(visionOS)` — it is ready for
-the Mac companion target and dead on the headset.
+Shipped:
 
-The client therefore ships `RemoteHomeProvider`, which holds the device list and the
-confirmation gate but cannot execute. Today a `toolCall` for a real device returns
-`ok: false` with `unavailableOnPlatform`.
+- **The protocol split**, in the shape this document recommended. `toolCall` carries
+  `executedBy: "client" | "server"`. When it is `server`, the client answers with
+  `confirmationResult { callId, approved }` and never sends a `toolResult` — it does not
+  claim to have acted, because it did not.
+- **A server-side dispatch path**: `agentd/executors.py` defines one boundary with two
+  implementations. `ClientExecutor` waits for the headset's `toolResult`; `ServerExecutor`
+  runs the call here against any `HomeExecutor`. `AGENTD_HOME=mock` wires in
+  `mocks/mock_home.py` today.
+- **The safety property, enforced once.** `ServerExecutor` will not execute an `unsafe` tool
+  without an approval naming its `callId`; a timeout and a refusal both mean no action.
+  Tests: `test_server_never_executes_unsafe_without_approval`,
+  `test_declined_confirmation_does_not_execute` — the server half this document asked for,
+  matching `AgentSessionTests.testServerAssertedSafeOnALockStillRequiresConfirmation`. The
+  client keeps its own independent safety table; stricter still wins.
 
-What the middle layer needs to add:
+Left:
 
-- **A HomeKit executor in the Mac companion.** `HomeBridge` compiles for macOS already; the
-  companion links it, runs `HMHomeManager`, and owns the user's Home authorization.
-- **A server-side tool dispatch path** that routes an approved `toolCall` to that executor
-  and returns the result, rather than expecting the headset to fulfil it.
-- **A protocol addition** to carry the split. The current `toolResult` assumes the client
-  executed. Two options, and the second is better:
-  - client forwards an `executeTool` message after confirmation; or
-  - the server executes directly and the client sends only a `confirmationResult`
-    (`callId`, `approved: Bool`). The headset then never claims to have done something it
-    did not do, and the client's job narrows to exactly what it is good for: asking a human.
-- **Preserve the safety property.** Whatever the shape, the rule from spec/04-home.md must
-  survive: the Mac executes, it does not decide. The client already enforces its own safety
-  table independently (`ToolSafety.effective`) and will refuse to approve an `unsafe` call
-  without a tap; the server must not have a path that acts on an `unsafe` tool it has not
-  received an approval for. `AgentSessionTests.testServerAssertedSafeOnALockStillRequiresConfirmation`
-  is the client half of that contract — the server needs the matching test.
-
-Alternative worth costing before committing: talk Matter directly from the headset over the
-LAN and skip HomeKit entirely. It removes the Mac from the physical-action path, which is
-the trust-simplest outcome, but it means implementing commissioning and the fabric, which is
-a much larger job than a macOS executor.
+- **The macOS companion itself.** `HomeBridge` compiles for macOS; something has to link it,
+  run `HMHomeManager`, own the Home authorization, and implement `HomeExecutor`. Nothing
+  else in `agentd` changes when it does — that is what the boundary bought.
+- The Matter-direct-from-headset alternative is still uncosted and still looks larger than a
+  macOS executor.
 
 ---
 
-## 2. Ambient events — the whole fourth loop is missing from the protocol
+## 2. Ambient events — done
 
-PRD §4 names **Ambient** as one of the four core loops, and spec/04-home.md describes home
-state pushing to the character unprompted, rate-limited and classified by interrupt level.
-The schema has no message for it. There is no way to express "the doorbell rang" — the
-server can only speak when spoken to.
+`ambientEvent { source, kind, interrupt, text }` is in the schema, in both languages, and in
+the client (`AgentSession.lastAmbient`; `now` speaks immediately, `passing` waits for idle,
+`silent` only updates state).
 
-Needed in `packages/AgentProtocol/schema/protocol.schema.json`, as a new `ServerEvent`:
+`agentd/ambient.py` owns the two things the client cannot: classification (`interrupt` is
+derived from `kind`, never from a device id) and the rate limiter — an 8s per-source
+cooldown plus a 3-token global bucket, so a flickering light group produces one event, not
+twenty. `diff_devices` turns consecutive `deviceStates` snapshots into candidates, which is
+what makes the doorbell reach the character unprompted. `fake_headset`'s `/ring` drives it.
 
-```
-ambientEvent -> { source: deviceId, kind: "doorbell"|"finished"|"sensor"|"stateChange",
-                  interrupt: "now"|"passing"|"silent", text: String }
-```
-
-`interrupt` must be server-asserted and coarse. The client decides the rendering — `now`
-takes the character to the door mid-conversation, `passing` waits for the next idle, `silent`
-only updates state — but it should not be inferring urgency from a device id.
-
-Also needed on the server: the rate limiter. A light group that flickers must not produce
-twenty events. The client will render what it is sent.
-
-Until this exists, the app is Presence + Address + Action only, and the PRD's stated
-difference from "a command line with legs" is unimplemented on both sides.
+Left: real sources beyond device diffs (timers, "the laundry finished"), which arrive with
+the macOS companion.
 
 ---
 
-## 3. Named places have no persistence path through the server
+## 3. Named places — done on the server side
 
-spec/05-scene.md: the user names a place by looking and speaking, and it persists per room
-across sessions. The client implements the storage half — `NamedPlaceStore` persists
-`PlaceRecord`s, and `ARKitSceneProvider.anchorPlace` creates the `WorldAnchor` that keeps
-them positionally valid across sessions.
+`requestPlace { name, prompt }` exists, and the model reaches it through an `ask_for_place`
+tool rather than by emitting a string: it asks in character ("Where's the kitchen?") instead
+of the client answering itself with `unknownPlace`. The session remembers what it has asked
+(`Session.requested_places`) and stops asking; naming the place clears the memory, because
+`update_scene` drops any place that now exists.
 
-The protocol only moves places *upward*, inside `sceneUpdate`. There is no way for the server
-to acknowledge a place, and more importantly no way for it to ask for one. The natural
-interaction — the user says "turn off the kitchen light", the model has no `kitchen` — has no
-expression. Today the client answers that case itself with
-`UnresolvedReason.unknownPlace`, which is a correct fallback but means the model never learns
-the room.
-
-Needed:
-
-- A `ServerEvent` for requesting a place be named, e.g.
-  `requestPlace -> { name: String, prompt: String }`, so the character can ask "where's the
-  kitchen?" as part of a conversation rather than as a client-side error string.
-- Server-side memory of which places it has seen, keyed by session, so it stops asking.
+Left: persistence across sessions is still client-side only (`NamedPlaceStore`). The server
+forgets on restart, which is correct for now — coordinates stay off the server.
 
 ---
 
-## 4. Deixis: devices have no positions, so `point` half-works
+## 4. Deixis: devices have no positions — unchanged, still v0.3
 
-`CharacterDirective` can carry `point` with a `deviceId`, and the resolver handles it — but
-`devicePositions` is passed empty from `AgentSession`, so any device-targeted `point` or
-`walkTo` resolves to `unknownDevice`. Only place-targeted directives work.
-
-This is a v0.3 item (PRD §5: "turn *that* off" resolved by where you are looking) but the
-gap is in the schema today: `Device` has `room` (a string) and no position. A device is a
-physical object in the room and the character needs to be able to walk to it and point at it.
-
-Needed: either a position on `Device`, supplied by the client once the user has placed it,
-or — cleaner, and consistent with §3 — a device→place association the client resolves
-locally. The second keeps coordinates out of the server entirely, which is the rule in
-docs/architecture.md §3b. Recommend the second.
+Still open, and the recommendation stands: a device→place association resolved on the client,
+not a position on `Device`, so coordinates stay out of the server (docs/architecture.md §3b).
+`AgentSession` still passes `devicePositions: [:]`.
 
 ---
 
-## 5. The 400ms reaction budget needs a server-side half
+## 5. The 400ms reaction budget — done
 
-PRD §6: time from end of request to first character motion under 400ms. The client meets
-this unilaterally — `AgentSession.send` puts the character into `thinking` on send, before
-anything is transmitted (`testCharacterEntersThinkingOnSendNotOnFirstToken`).
-
-But the interesting version of this is the server reacting *before* the model answers: an
-immediate `characterDirective(lookAt: .user)` or `emote(.thinking)` on receipt of
-`userUtterance`, ahead of the first token. `directives.py` currently derives directives from
-matched text, which means they arrive with or after the answer.
-
-Needed: `agentd` emits an acknowledgement directive on `userUtterance` receipt, synchronously,
-before the model adapter is called. Cheap to add, and it is the difference between a
-character that starts turning toward you mid-sentence and one that waits politely for the
-model.
+`Session.handle_utterance` yields `lookAt(user)` and `emote(thinking)` before the adapter is
+consulted. Test: `test_character_reacts_before_model_output`. Both halves now react on send
+rather than on first token.
 
 ---
 
-## 6. Reconnect must actually resume, and nothing proves it does
+## 6. Reconnect resumes — done
 
-spec/03-protocol.md: session state lives on the server, so a reconnect resumes rather than
-restarts. The client implements the reconnect (`WebSocketAgentChannel`, exponential backoff
-0.25s→8s) and on reconnect replays `hello`, the scene snapshot and the device snapshot.
+`hello` carries an optional `sessionId`; `ready` carries `resumed`. `SessionStore` keeps the
+transcript for 30 minutes past a dropped socket, so a sleep/wake continues the conversation.
+`AgentConnection` stores the id from `ready` and offers it back on every reconnect, and a
+resumed session picks up attention rather than greeting the user again.
 
-What is missing is any way for the client to say *which* session it is resuming. `hello`
-carries `protocolVersion` and `client` and nothing else, so the server cannot distinguish a
-reconnect from a new headset, and after a sleep/wake the conversation silently restarts.
-
-Needed:
-
-- `hello` gains an optional `sessionId`. The client stores the one it got from `ready` and
-  offers it back.
-- `ready` states whether the session was resumed or created, so the character can behave
-  correctly — picking up mid-thought versus greeting you again are different behaviours.
-- A pytest that kills and reopens the socket mid-conversation and asserts the transcript
-  survived. `fake_headset.py` is the right place to drive it.
+Tests: `test_reconnect_resumes_the_same_session` kills and reopens the socket mid-conversation
+and asserts the transcript survived; `fake_headset --resume <id>` drives the same path by hand.
 
 ---
 
-## 7. Speech input (v0.2) is a client job, but the protocol needs one field
+## 7. Speech input — protocol half done
 
-Not blocking now. When speech lands, `userUtterance` will want an `isFinal` flag so partial
-transcripts can stream and the character can begin reacting to a half-finished sentence.
-Flagging it here so the schema change happens once rather than twice.
+`userUtterance.isFinal` exists on both sides. A partial transcript moves the character and is
+deliberately not sent to the model (`test_partial_transcript_moves_the_character_but_not_the_model`).
+The client work is still to come; the schema change has happened once.
 
 ---
 
 ## 8. Smaller items
 
-- **Port.** `agentd` defaults to 8787 (`__main__.py`); the client's Bonjour fallback now
-  matches. The Bonjour service itself is not published yet — `agentd` needs to advertise
-  `_spatialagent._tcp` on that port, or discovery finds nothing and every connection is
-  manual. This is the single highest-value small item in this document.
-- **`ping`/`pong`.** The client never sends `ping`. The server should state an idle timeout
-  in `ready.capabilities` so the client knows the keepalive interval instead of guessing.
-- **`ready.capabilities`.** Named in docs/architecture.md §3b and spec/03-protocol.md but not
-  in the schema — `ready` carries only `sessionId`, `protocolVersion`, `model`. The client
-  needs it to know what the server can actually do (ambient events? tool execution? speech?)
-  rather than discovering by failure.
-- **Codegen.** `make protocol` does not exist. The Swift types in
-  `packages/Sources/AgentProtocol/Generated/WireTypes.swift` are hand-maintained and held to
-  the schema by `AgentProtocolTests` asserting field-name spelling. That is a stopgap; the
-  CI diff check described in docs/architecture.md §3a is what actually prevents drift.
-- **Tool result shape.** `set_light` returns the new state dict. Worth fixing in the registry
-  whether every tool returns the resulting device state, so the character can report what
+- **Bonjour — done.** `agentd/discovery.py` advertises `_spatialagent._tcp` on the serving
+  port with `model`, `protocolVersion` and `path` in TXT. `--no-bonjour` disables it. The
+  client's `Info.plist` already lists the matching `NSBonjourServices` entry.
+- **`ping`/`pong` — done.** `ready.capabilities.idleTimeoutSeconds` states the interval, so
+  the client stops guessing. `ping` is answered before `hello`, since a keepalive is not a
+  conversation.
+- **`ready.capabilities` — done.** Carries `ambientEvents`, `toolExecution`, `requestPlace`,
+  `speechInput`, `idleTimeoutSeconds`. A `ready` without it decodes to conservative defaults,
+  so a v0.1 server still connects.
+- **Codegen — partly done.** `make protocol` exists and runs `scripts/check_protocol.py`,
+  which fails if any message type or field in the schema is missing from either language.
+  That catches drift; it still does not write the types. Real generation
+  (datamodel-code-generator for Python, a Swift emitter) remains phase 3.
+- **Tool result shape — done.** Every mutating tool returns `{id, state}`, and the session
+  merges that back into its device snapshot so the prompt and the character report what
   actually happened rather than "done".
+
+## New in phase 2, not requested here
+
+- **The agent loop actually loops.** A tool result now goes back through the model (up to
+  `MAX_TOOL_ROUNDS`), so the character can report what it found instead of narrating a call
+  it never saw the answer to.
+- **A second real backend.** `adapters/openai_compat.py` covers llama.cpp's server, LM
+  Studio and vLLM, including tool calls reassembled from streamed fragments. Proof that the
+  adapter boundary holds.
+- **Concurrent turns.** The socket reader and the agent loop run as separate tasks over one
+  outbound queue, which is what lets a `toolResult`, a confirmation, or an ambient push
+  arrive mid-turn.

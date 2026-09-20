@@ -5,7 +5,9 @@ import logging
 
 import uvicorn
 
-from .server import create_app
+from .discovery import Advertiser
+from .protocol import PROTOCOL_VERSION
+from .server import build_adapter, create_app
 
 
 def main() -> None:
@@ -14,10 +16,25 @@ def main() -> None:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--log-level", default="info")
+    parser.add_argument("--no-bonjour", action="store_true",
+                        help="skip mDNS advertisement; the client connects by IP")
     args = parser.parse_args()
 
     logging.basicConfig(level=args.log_level.upper())
-    uvicorn.run(create_app(), host=args.host, port=args.port, log_level=args.log_level)
+
+    adapter = build_adapter()
+    app = create_app(adapter)
+
+    advertiser = None
+    if not args.no_bonjour:
+        advertiser = Advertiser(args.port, adapter.name, PROTOCOL_VERSION)
+        advertiser.start()
+
+    try:
+        uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
+    finally:
+        if advertiser is not None:
+            advertiser.stop()
 
 
 if __name__ == "__main__":
