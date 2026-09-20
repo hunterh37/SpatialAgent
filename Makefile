@@ -3,7 +3,7 @@
 VENV := services/agentd/.venv
 PY   := $(VENV)/bin/python
 
-.PHONY: help protocol test test-python test-swift lint serve headset clean
+.PHONY: help protocol test test-python test-swift lint serve headset clean app home-app
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/'
@@ -29,6 +29,11 @@ live: $(VENV) ## End-to-end: ollama + agentd + the real Swift client stack
 
 live-app: $(VENV) ## End-to-end through the visionOS app itself, in the simulator
 	@scripts/live-app-test.sh
+
+home-app: ## Generate and build the macOS companion that owns HomeKit
+	cd apps/SpatialAgentHome && xcodegen generate && \
+		xcodebuild -project SpatialAgentHome.xcodeproj -scheme SpatialAgentHome \
+		-destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
 
 app: ## Generate the Xcode project and build the visionOS app
 	cd apps/SpatialAgent && xcodegen generate && \
