@@ -15,6 +15,8 @@ import httpx
 
 from .base import Chunk
 
+DEFAULT_TEMPERATURE = 0.2
+
 
 class OpenAICompatAdapter:
     name = "openai-compat"
@@ -25,12 +27,14 @@ class OpenAICompatAdapter:
         base_url: str = "http://127.0.0.1:1234/v1",
         api_key: str = "not-needed",
         timeout: float = 120.0,
+        temperature: float = DEFAULT_TEMPERATURE,
     ) -> None:
         self.model = model
         self.name = f"openai-compat/{model}"
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._timeout = timeout
+        self._temperature = temperature
 
     async def stream(
         self,
@@ -41,6 +45,7 @@ class OpenAICompatAdapter:
             "model": self.model,
             "messages": [_sanitize(m) for m in messages],
             "stream": True,
+            "temperature": self._temperature,
         }
         if tools:
             body["tools"] = tools

@@ -56,10 +56,15 @@ anything. These are verified against this agent loop on an M2 Pro.
 | `qwen3:1.7b` | 1.4 GB | cheapest that still calls tools; emits reasoning, which is stripped |
 | `echo` backend | 0 | no model at all, for CI and for working on the loop itself |
 
-Two things a small model gets wrong that the middle layer now absorbs: it emits `"false"`
-as a string, which `bool()` would read as True, so arguments are coerced to the declared
-type before anything executes; and a reasoning model inlines `<think>` blocks, which are
-filtered out of the token stream so the character never speaks its own scratchpad.
+Three things a small model gets wrong that the middle layer absorbs. It emits `"false"` as
+a string, which `bool()` would read as True, so arguments are coerced to the declared type
+before anything executes. A reasoning model inlines `<think>` blocks, which are filtered out
+of the token stream so the character never speaks its own scratchpad. And it acts without
+narrating, so movement is a tool (`walk_to`) rather than a regex over its prose — a place
+the client never sent cannot be walked to, whatever the model writes.
+
+Sampling defaults to 0.2 for the same reason: at higher temperatures a 3B model starts
+describing the action instead of calling it.
 
 ## Who executes a tool
 
@@ -79,8 +84,14 @@ changes. The headset then never claims to have done something it did not do.
 
 ```bash
 .venv/bin/python -m pytest        # from services/agentd
-make test                         # from the repo root: schema check + python + swift
+make test                         # schema check + python + swift, no model needed
+make live                         # ollama + agentd + the real Swift client stack
+make live-app                     # ollama + agentd + the visionOS app in the simulator
 ```
+
+`make live` and `make live-app` are the only tests where both languages are present at
+once, so they are the only ones that can catch a Swift/Python disagreement — the class of
+bug that otherwise surfaces on a headset.
 
 Runs headless on Linux CI. `tests/test_session.py` exercises the full agent loop: scenario
 in, assert on the sequence of `ServerEvent`s out.
@@ -111,7 +122,9 @@ mocks/                  fake headset, scenario fixtures, mock smart home
 | `OPENAI_BASE_URL` | `http://127.0.0.1:1234/v1` | for the OpenAI-compatible backend |
 | `AGENTD_HOME` | `client` | `mock` executes tools here instead of on the headset |
 | `AGENTD_SCENARIO` | `apartment` | which fixture `AGENTD_HOME=mock` loads |
-| `AGENTD_TOOL_TIMEOUT` | `30` | seconds to wait for a result or a confirmation |
+| `AGENTD_TOOL_TIMEOUT` | `30` | seconds to wait for a client-executed result |
+| `AGENTD_CONFIRM_TIMEOUT` | `120` | seconds to wait for a human; longer on purpose |
+| `AGENTD_TEMPERATURE` | `0.2` | this model is a controller, not a writer |
 
 ## Phase boundaries
 

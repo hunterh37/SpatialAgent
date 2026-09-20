@@ -55,9 +55,12 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("SpatialAgent").font(.title)
                 Text(connectionLabel).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("connection.label")
             }
             Spacer()
-            Toggle("In the room", isOn: spaceBinding).toggleStyle(.button)
+            Toggle("In the room", isOn: spaceBinding)
+                .toggleStyle(.button)
+                .accessibilityIdentifier("space.toggle")
         }
         .overlay(alignment: .bottomLeading) {
             if let problem = model.placementProblem ?? voiceProblem {
@@ -99,6 +102,9 @@ struct ContentView: View {
                             Text(entry.text)
                         }
                         .id(entry.id)
+                        .accessibilityIdentifier(
+                            entry.role == .user ? "transcript.user" : "transcript.agent"
+                        )
                     }
                     if session.isStreaming {
                         SpeechBubble(text: session.currentReply, isStreaming: true)
@@ -120,9 +126,11 @@ struct ContentView: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($fieldFocused)
                 .onSubmit(send)
+                .accessibilityIdentifier("composer.field")
             Button("Send", action: send)
                 .buttonStyle(.borderedProminent)
                 .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+                .accessibilityIdentifier("composer.send")
         }
         .padding(.top, 14)
     }
@@ -150,7 +158,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var confirmationOrnament: some View {
-        if let pending = session.confirmations.pending.first {
+        if let pending = session.pendingConfirmations.first {
             ConfirmationView(
                 summary: pending.summary,
                 deviceName: pending.deviceName,

@@ -113,7 +113,9 @@ def _lock_session(home: MockHome, extra: list[Chunk] | None = None) -> Session:
         *(extra or []),
         Chunk(done=True),
     ])
-    return Session(adapter, default_registry(), ServerExecutor(home, timeout=1.0))
+    return Session(
+        adapter, default_registry(), ServerExecutor(home, timeout=1.0, confirm_timeout=1.0)
+    )
 
 
 async def test_server_executed_unsafe_tool_waits_for_approval() -> None:
@@ -355,3 +357,90 @@ async def test_the_walk_is_not_repeated_for_a_second_call_in_the_same_room() -> 
     events = await _collect(session, "kitchen light off then check it")
     walks = [e for e in events if isinstance(e, Directive) and e.directive.kind == "walkTo"]
     assert len(walks) == 1
+
+
+# --- movement is a tool call, not a regex on prose --------------------------
+
+
+def _walk_session(place: str, scene=True) -> Session:
+    session = Session(
+        EchoAdapter(scripted=[
+            Chunk(tool_calls=[{"function": {"name": "walk_to",
+                                            "arguments": {"place": place}}}]),
+            Chunk(done=True),
+        ]),
+        default_registry(),
+    )
+    if scene:
+        session.update_scene(Scenario.load("apartment").scene)
+    return session
+
+
+async def test_walk_to_tool_emits_a_directive() -> None:
+    session = _walk_session("kitchen")
+    events = await _collect(session, "go to the kitchen")
+    walks = [e for e in events if isinstance(e, Directive) and e.directive.kind == "walkTo"]
+    assert [w.directive.place for w in walks] == ["kitchen"]
+    # It never reaches an executor: nothing in the home was asked to do anything.
+    assert not [e for e in events if isinstance(e, ToolCall)]
+
+
+async def test_walk_to_matches_a_place_name_case_insensitively() -> None:
+    session = _walk_session("Front Door")
+    events = await _collect(session, "go to the door")
+    walks = [e for e in events if isinstance(e, Directive) and e.directive.kind == "walkTo"]
+    assert [w.directive.place for w in walks] == ["front door"]
+
+
+async def test_walk_to_an_invented_place_moves_nothing() -> None:
+    """The failure mode this prevents is a character walking into a wall."""
+    session = _walk_session("conservatory")
+    events = await _collect(session, "go to the conservatory")
+    assert not [e for e in events if isinstance(e, Directive) and e.directive.kind == "walkTo"]
+    # The model is told what does exist, so its next turn can recover.
+    tool_reply = next(m for m in session.history if m["role"] == "tool")
+    assert "no such place" in tool_reply["content"]
+    assert "kitchen" in tool_reply["content"]
+
+
+async def test_look_at_defaults_to_the_user() -> None:
+    session = Session(
+        EchoAdapter(scripted=[
+            Chunk(tool_calls=[{"function": {"name": "look_at", "arguments": {"target": "me"}}}]),
+            Chunk(done=True),
+        ]),
+        default_registry(),
+    )
+    session.update_scene(Scenario.load("apartment").scene)
+    events = await _collect(session, "look at me")
+    looks = [
+        e for e in events
+        if isinstance(e, Directive) and e.directive.kind == "lookAt" and e.directive.target
+    ]
+    assert looks[-1].directive.target == "user"
+
+
+async def test_look_at_a_known_place_targets_that_place() -> None:
+    session = Session(
+        EchoAdapter(scripted=[
+            Chunk(tool_calls=[{"function": {"name": "look_at",
+                                            "arguments": {"target": "couch"}}}]),
+            Chunk(done=True),
+        ]),
+        default_registry(),
+    )
+    session.update_scene(Scenario.load("apartment").scene)
+    events = await _collect(session, "look at the couch")
+    place_looks = [
+        e for e in events
+        if isinstance(e, Directive) and e.directive.kind == "lookAt" and e.directive.place
+    ]
+    assert place_looks[0].directive.place == "couch"
+
+
+async def test_the_server_waits_longer_for_a_human_than_for_a_machine() -> None:
+    """The client's gate closes at 30s. If the server gave up at the same moment, a tap
+    could land on a call it had already abandoned."""
+    home = MockHome(Scenario.load("apartment").devices)
+    executor = ServerExecutor(home, timeout=30.0)
+    assert executor._confirm_timeout > executor._timeout

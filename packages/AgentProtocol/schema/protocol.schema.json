@@ -331,6 +331,7 @@
             "utteranceEnd",
             "characterDirective",
             "toolCall",
+            "homeDevices",
             "ambientEvent",
             "requestPlace",
             "error",
@@ -443,6 +444,23 @@
             "name",
             "safety"
           ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "homeDevices"
+            },
+            "devices": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Device"
+              }
+            }
+          },
+          "required": [
+            "devices"
+          ],
+          "description": "The server's own device list, sent when the server owns execution and the client therefore has no home of its own to read."
         },
         {
           "properties": {

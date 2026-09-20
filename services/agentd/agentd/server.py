@@ -23,6 +23,7 @@ from .protocol import (
     DeviceStates,
     Error,
     Hello,
+    HomeDevices,
     Ping,
     Pong,
     Ready,
@@ -47,15 +48,18 @@ def build_adapter() -> ModelAdapter:
     backend = os.environ.get("AGENTD_BACKEND", "ollama")
     if backend == "echo":
         return EchoAdapter(delay=float(os.environ.get("AGENTD_ECHO_DELAY", "0.02")))
+    temperature = float(os.environ.get("AGENTD_TEMPERATURE", "0.2"))
     if backend in {"openai", "openai-compat", "llamacpp", "lmstudio", "vllm"}:
         return OpenAICompatAdapter(
             model=os.environ.get("AGENTD_MODEL", "local-model"),
             base_url=os.environ.get("OPENAI_BASE_URL", "http://127.0.0.1:1234/v1"),
             api_key=os.environ.get("OPENAI_API_KEY", "not-needed"),
+            temperature=temperature,
         )
     return OllamaAdapter(
         model=os.environ.get("AGENTD_MODEL", DEFAULT_MODEL),
         base_url=os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434"),
+        temperature=temperature,
     )
 
 
@@ -157,6 +161,11 @@ def create_app(
                             resumed=resumed is not None,
                         )
                     )
+                    # When this machine owns the home, the client has no device list of its
+                    # own — it needs ours to name a device in a confirmation prompt.
+                    owned = session.adopt_server_devices()
+                    if owned:
+                        emit(HomeDevices(devices=owned))
                     continue
 
                 if isinstance(message, Ping):

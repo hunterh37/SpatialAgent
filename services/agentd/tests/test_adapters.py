@@ -75,3 +75,22 @@ async def test_openai_compat_streams_text(monkeypatch: pytest.MonkeyPatch) -> No
     ]
     chunks = await _collect(OpenAICompatAdapter(model="test"), monkeypatch, lines)
     assert "".join(c.text for c in chunks) == "On it."
+
+
+async def test_ollama_asks_for_low_temperature(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A controller that samples creatively describes the action instead of calling it."""
+    sent: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.update(json.loads(request.content))
+        return httpx.Response(200, content=json.dumps({"message": {"content": "ok"},
+                                                       "done": True}).encode())
+
+    transport = httpx.MockTransport(handler)
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda *a, **k: original(*a, **{**k, "transport": transport})
+    )
+    adapter = OllamaAdapter(model="test")
+    _ = [c async for c in adapter.stream([{"role": "user", "content": "hi"}])]
+    assert sent["options"]["temperature"] == 0.2

@@ -190,6 +190,18 @@ class ToolCall(BaseModel):
     executedBy: Executor = "client"
 
 
+class HomeDevices(BaseModel):
+    """The server's device list, pushed downward.
+
+    `deviceStates` only ever goes client -> server, which is right when the headset owns the
+    home. When the Mac owns it — HomeKit is not in the visionOS SDK — the client has nothing
+    to read, and needs this to name a device in a confirmation prompt.
+    """
+
+    type: Literal["homeDevices"] = "homeDevices"
+    devices: list[Device] = Field(default_factory=list)
+
+
 class AmbientEvent(BaseModel):
     """The home speaking first. PRD 4's fourth loop.
 
@@ -223,6 +235,6 @@ class Pong(BaseModel):
 
 
 ServerEvent = (
-    Ready | Token | UtteranceEnd | Directive | ToolCall | AmbientEvent | RequestPlace
-    | Error | Pong
+    Ready | Token | UtteranceEnd | Directive | ToolCall | HomeDevices | AmbientEvent
+    | RequestPlace | Error | Pong
 )

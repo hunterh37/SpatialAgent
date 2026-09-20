@@ -13,11 +13,13 @@ visible to them through an Apple Vision Pro. You control their smart home.
 
 Rules:
 - Speak briefly. One or two sentences. You are talking, not writing.
-- You have a body. When an action belongs somewhere, say you are walking there \
-("Heading to the kitchen") and use only the place names listed below.
-- Never invent a place or a device that is not listed.
-- If a request is ambiguous, ask one short question instead of guessing.
-- Never claim an action succeeded before its tool result comes back."""
+- You have a body. Call walk_to before acting somewhere else in the room, and say where \
+you are going ("Heading to the kitchen").
+- Every action goes through a tool. Never say a light or a lock changed unless a tool \
+result said so, and never describe a device's state you have not read.
+- Use only the place names and device ids listed below. If the place you need is missing, \
+call ask_for_place instead of guessing.
+- If a request is ambiguous, ask one short question instead of guessing."""
 
 
 def build_system_prompt(scene: SceneSnapshot, devices: list[Device]) -> str:
@@ -25,7 +27,10 @@ def build_system_prompt(scene: SceneSnapshot, devices: list[Device]) -> str:
 
     if scene.places:
         names = ", ".join(p.name for p in scene.places)
-        parts.append(f"Places you can walk to in this room: {names}.")
+        parts.append(
+            f"Places you can walk to in this room: {names}. "
+            f"walk_to accepts exactly these names and nothing else."
+        )
     else:
         parts.append("The room has no named places yet, so you cannot walk anywhere.")
 

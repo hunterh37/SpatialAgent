@@ -12,7 +12,8 @@ $(VENV):
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install -q -e "services/agentd[dev]"
 
-protocol: ## Check Swift and Python wire types against the schema (CI fails on drift)
+protocol: $(VENV) ## Regenerate the conformance corpus and check both languages for drift
+	@cd services/agentd && .venv/bin/python -m agentd.conformance > /dev/null
 	@python3 scripts/check_protocol.py
 
 test-python: $(VENV) ## Headless agent loop, runs on Linux CI
@@ -22,6 +23,17 @@ test-swift: ## Packages only; no simulator, no headset
 	cd packages && swift test
 
 test: protocol test-python test-swift ## Everything a contributor can run locally
+
+live: $(VENV) ## End-to-end: ollama + agentd + the real Swift client stack
+	@scripts/live-test.sh
+
+live-app: $(VENV) ## End-to-end through the visionOS app itself, in the simulator
+	@scripts/live-app-test.sh
+
+app: ## Generate the Xcode project and build the visionOS app
+	cd apps/SpatialAgent && xcodegen generate && \
+		xcodebuild -project SpatialAgent.xcodeproj -scheme SpatialAgent \
+		-destination 'generic/platform=visionOS Simulator' build
 
 lint: $(VENV)
 	cd services/agentd && .venv/bin/ruff check .

@@ -265,6 +265,9 @@ public enum ServerEvent: Codable, Hashable, Sendable {
     case utteranceEnd(utteranceId: String)
     case characterDirective(CharacterDirective)
     case toolCall(callId: String, name: String, args: JSONObject?, safety: Safety, executedBy: Executor)
+    /// The server's own device list, when the server owns execution and this client has no
+    /// home of its own to read (HomeKit is absent from the visionOS SDK).
+    case homeDevices(devices: [Device])
     /// The home speaking first (PRD §4).
     case ambientEvent(source: String, kind: AmbientKind, interrupt: AmbientInterrupt, text: String)
     /// The agent needs a place it does not have; ask the user in character.
@@ -275,7 +278,7 @@ public enum ServerEvent: Codable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case type, sessionId, protocolVersion, model, capabilities, resumed, utteranceId, text
         case directive, callId, name, args, safety, executedBy, code, message
-        case source, kind, interrupt, prompt
+        case source, kind, interrupt, prompt, devices
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -305,6 +308,9 @@ public enum ServerEvent: Codable, Hashable, Sendable {
             try c.encodeIfPresent(args, forKey: .args)
             try c.encode(safety, forKey: .safety)
             try c.encode(executedBy, forKey: .executedBy)
+        case let .homeDevices(devices):
+            try c.encode("homeDevices", forKey: .type)
+            try c.encode(devices, forKey: .devices)
         case let .ambientEvent(source, kind, interrupt, text):
             try c.encode("ambientEvent", forKey: .type)
             try c.encode(source, forKey: .source)
@@ -353,6 +359,8 @@ public enum ServerEvent: Codable, Hashable, Sendable {
                 safety: try c.decode(Safety.self, forKey: .safety),
                 executedBy: try c.decodeIfPresent(Executor.self, forKey: .executedBy) ?? .client
             )
+        case "homeDevices":
+            self = .homeDevices(devices: try c.decode([Device].self, forKey: .devices))
         case "ambientEvent":
             self = .ambientEvent(
                 source: try c.decode(String.self, forKey: .source),

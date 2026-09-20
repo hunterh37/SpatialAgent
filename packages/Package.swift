@@ -59,5 +59,12 @@ let package = Package(
         .testTarget(name: "CharacterKitTests", dependencies: ["CharacterKit"], swiftSettings: swift5),
         .testTarget(name: "HomeBridgeTests", dependencies: ["HomeBridge"], swiftSettings: swift5),
         .testTarget(name: "AgentKitTests", dependencies: ["AgentKit"], swiftSettings: swift5),
+        // Live end-to-end against a running agentd + local model. Skips itself unless
+        // AGENTD_LIVE_URL is set, so `swift test` stays offline-clean.
+        .testTarget(
+            name: "LiveIntegrationTests",
+            dependencies: ["AgentKit", "AgentTransport", "CharacterKit", "SceneUnderstanding"],
+            swiftSettings: swift5
+        ),
     ]
 )

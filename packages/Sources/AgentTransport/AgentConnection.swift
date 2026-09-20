@@ -40,17 +40,26 @@ public actor WebSocketAgentChannel: AgentChannel {
     private var recorder: SessionRecorder?
 
     private let session: URLSession
+    private let store: UserDefaults?
     private let log = Logger(subsystem: "io.medvr.SpatialAgent", category: "transport")
+
+    /// Where the resumable session id survives an app relaunch. The headset sleeping is the
+    /// common case; the app being killed and reopened is the same conversation to the user.
+    public static let sessionIdKey = "agent.lastSessionId"
 
     /// Backoff schedule in seconds, clamped at the last value.
     private let backoff: [Double] = [0.25, 0.5, 1, 2, 4, 8]
 
-    public init(recorder: SessionRecorder? = nil) {
+    /// - Parameter store: where the last session id is remembered. `nil` disables
+    ///   persistence, which is what a test wants when it is checking a cold start.
+    public init(recorder: SessionRecorder? = nil, store: UserDefaults? = .standard) {
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = true
         config.timeoutIntervalForRequest = 15
         session = URLSession(configuration: config)
         self.recorder = recorder
+        self.store = store
+        lastSessionId = store?.string(forKey: Self.sessionIdKey)
         var cont: AsyncStream<ServerEvent>.Continuation!
         events = AsyncStream { cont = $0 }
         continuation = cont
@@ -128,6 +137,18 @@ public actor WebSocketAgentChannel: AgentChannel {
         }
     }
 
+    private func store(sessionId: String) {
+        lastSessionId = sessionId
+        store?.set(sessionId, forKey: Self.sessionIdKey)
+    }
+
+    /// Drops the socket without clearing the session id, so the next `connect` resumes.
+    /// This is what a sleep/wake looks like from the client's side.
+    public func simulateDropForTesting() {
+        task?.cancel(with: .abnormalClosure, reason: nil)
+        task = nil
+    }
+
     private func handle(_ frame: String) {
         recorder?.record(inbound: frame)
         do {
@@ -138,7 +159,7 @@ public actor WebSocketAgentChannel: AgentChannel {
             }
             if case let .ready(sessionId, _, _, _, _) = event {
                 attempt = 0
-                lastSessionId = sessionId
+                store(sessionId: sessionId)
             }
             continuation.yield(event)
         } catch {

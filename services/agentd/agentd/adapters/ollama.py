@@ -10,6 +10,11 @@ import httpx
 
 from .base import Chunk
 
+# This model is a controller, not a writer. Sampling that wanders produces an answer about
+# turning the light off instead of a call that turns it off, which on a 3B model is the
+# difference between the loop working and not.
+DEFAULT_TEMPERATURE = 0.2
+
 
 class OllamaAdapter:
     name = "ollama"
@@ -19,18 +24,25 @@ class OllamaAdapter:
         model: str = "llama3.2",
         base_url: str = "http://127.0.0.1:11434",
         timeout: float = 120.0,
+        temperature: float = DEFAULT_TEMPERATURE,
     ) -> None:
         self.model = model
         self.name = f"ollama/{model}"
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._temperature = temperature
 
     async def stream(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[Chunk]:
-        body: dict[str, Any] = {"model": self.model, "messages": messages, "stream": True}
+        body: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            "options": {"temperature": self._temperature},
+        }
         if tools:
             body["tools"] = tools
 

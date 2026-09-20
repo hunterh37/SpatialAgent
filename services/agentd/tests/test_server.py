@@ -189,3 +189,57 @@ def test_server_side_execution_takes_only_a_confirmation() -> None:
         }))
         _drain_until(ws, "utteranceEnd")
         assert home.devices["lock.front"].state["locked"] is False
+
+
+def test_server_owned_home_is_pushed_to_the_client() -> None:
+    """HomeKit is absent on visionOS, so a server-executing setup has to say what it holds."""
+    home = MockHome(Scenario.load("apartment").devices)
+    app = create_app(EchoAdapter(), ServerExecutor(home))
+    with TestClient(app).websocket_connect("/agent") as ws:
+        ready = _hello(ws)
+        assert ready["capabilities"]["toolExecution"] == "server"
+
+        event = ws.receive_json()
+        assert event["type"] == "homeDevices"
+        assert {d["id"] for d in event["devices"]} == {
+            "light.kitchen", "light.desk", "lock.front", "sensor.doorbell"
+        }
+
+
+def test_client_owned_home_is_not_pushed() -> None:
+    with _client().websocket_connect("/agent") as ws:
+        assert _hello(ws)["capabilities"]["toolExecution"] == "client"
+        ws.send_text(json.dumps({"type": "ping"}))
+        # Nothing between ready and pong: the client's own devices are the source.
+        assert ws.receive_json()["type"] == "pong"
+
+
+def test_server_owned_devices_reach_the_prompt() -> None:
+    home = MockHome(Scenario.load("apartment").devices)
+    app = create_app(EchoAdapter(), ServerExecutor(home))
+    with TestClient(app).websocket_connect("/agent") as ws:
+        session_id = _hello(ws)["sessionId"]
+        ws.receive_json()
+
+    from agentd.prompt import build_system_prompt
+
+    session = app.state.sessions.get(session_id)
+    assert "light.kitchen" in build_system_prompt(session.scene, session.devices)
+
+
+def test_an_empty_client_snapshot_does_not_wipe_a_server_owned_home() -> None:
+    """visionOS has no HomeKit, so the app sends `devices: []`. Believing it left the model
+    with nothing to control."""
+    home = MockHome(Scenario.load("apartment").devices)
+    app = create_app(EchoAdapter(), ServerExecutor(home))
+    with TestClient(app).websocket_connect("/agent") as ws:
+        session_id = _hello(ws)["sessionId"]
+        ws.receive_json()  # homeDevices
+        ws.send_text(json.dumps({"type": "deviceStates", "devices": []}))
+        ws.send_text(json.dumps({"type": "ping"}))
+        assert ws.receive_json()["type"] == "pong"
+
+    session = app.state.sessions.get(session_id)
+    assert [d.id for d in session.devices] == [
+        "light.kitchen", "light.desk", "lock.front", "sensor.doorbell"
+    ]

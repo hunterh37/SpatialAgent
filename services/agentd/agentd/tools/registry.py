@@ -11,8 +11,12 @@ from typing import Any
 
 from ..protocol import Safety
 
-# Handled by the session itself, not by any executor: it asks the user a question.
+# Handled by the session itself, not by any executor: these move or question the character
+# rather than touching the home, so no HomeExecutor ever sees them.
 ASK_FOR_PLACE = "ask_for_place"
+WALK_TO = "walk_to"
+LOOK_AT = "look_at"
+CHARACTER_TOOLS = frozenset({ASK_FOR_PLACE, WALK_TO, LOOK_AT})
 
 
 @dataclass(frozen=True)
@@ -136,6 +140,21 @@ def default_registry() -> ToolRegistry:
                     "on": {"type": "boolean", "required": True},
                     "brightness": {"type": "integer"},
                 },
+            ),
+            Tool(
+                name=WALK_TO,
+                description=(
+                    "Walk your body to a named place in the room before acting there. "
+                    "Only the places listed in the system prompt exist."
+                ),
+                safety="safe",
+                parameters={"place": {"type": "string", "required": True}},
+            ),
+            Tool(
+                name=LOOK_AT,
+                description="Turn to look at the user, or at a named place.",
+                safety="safe",
+                parameters={"target": {"type": "string", "required": True}},
             ),
             Tool(
                 name=ASK_FOR_PLACE,

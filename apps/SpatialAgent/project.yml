@@ -63,3 +63,28 @@ targets:
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "7"
         ENABLE_PREVIEWS: YES
+
+  SpatialAgentUITests:
+    type: bundle.ui-testing
+    platform: visionOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: SpatialAgent
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.medvr.SpatialAgentUITests
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "7"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: SpatialAgent
+
+schemes:
+  SpatialAgent:
+    build:
+      targets:
+        SpatialAgent: all
+        SpatialAgentUITests: [test]
+    test:
+      targets:
+        - SpatialAgentUITests

@@ -33,8 +33,10 @@ public struct ConfirmationView: View {
             HStack(spacing: 12) {
                 Button("Cancel", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("confirmation.cancel")
                 Button("Confirm", action: onConfirm)
                     .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("confirmation.confirm")
             }
         }
         .padding(22)

@@ -23,6 +23,10 @@ from typing import Any, Protocol
 from .protocol import Executor, Safety
 
 DEFAULT_TIMEOUT = float(os.environ.get("AGENTD_TOOL_TIMEOUT", "30"))
+# A person has to read the prompt and decide. The client's own gate closes at 30s
+# (ConfirmationGate.timeout); the server waits longer so a tap is never answered into a
+# call the server has already abandoned.
+DEFAULT_CONFIRM_TIMEOUT = float(os.environ.get("AGENTD_CONFIRM_TIMEOUT", "120"))
 
 
 @dataclass
@@ -37,6 +41,10 @@ class HomeExecutor(Protocol):
     companion, by a HomeKit bridge."""
 
     def execute(self, name: str, args: dict[str, Any]) -> tuple[bool, dict[str, Any], str | None]:
+        ...
+
+    def snapshot(self) -> list[Any]:
+        """Current devices, so the server can tell the client what it is holding."""
         ...
 
 
@@ -111,9 +119,22 @@ class ServerExecutor:
 
     location: Executor = "server"
 
-    def __init__(self, home: HomeExecutor, timeout: float = DEFAULT_TIMEOUT) -> None:
+    def __init__(
+        self,
+        home: HomeExecutor,
+        timeout: float = DEFAULT_TIMEOUT,
+        confirm_timeout: float | None = None,
+    ) -> None:
+        self.home = home
         self._home = home
         self._timeout = timeout
+        self._confirm_timeout = (
+            confirm_timeout if confirm_timeout is not None else max(timeout, DEFAULT_CONFIRM_TIMEOUT)
+        )
+
+    def devices(self) -> list[Any]:
+        snapshot = getattr(self._home, "snapshot", None)
+        return list(snapshot()) if callable(snapshot) else []
 
     async def run(
         self, call_id: str, name: str, args: dict[str, Any], safety: Safety, pending: PendingCalls
@@ -121,7 +142,7 @@ class ServerExecutor:
         if safety == "unsafe":
             try:
                 approved = await asyncio.wait_for(
-                    pending.expect_approval(call_id), self._timeout
+                    pending.expect_approval(call_id), self._confirm_timeout
                 )
             except TimeoutError:
                 return Outcome(False, {}, "confirmation timed out")

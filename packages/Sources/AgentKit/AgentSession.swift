@@ -1,6 +1,7 @@
 import AgentProtocol
 import AgentTransport
 import CharacterKit
+import Combine
 import Foundation
 import HomeBridge
 import SceneUnderstanding
@@ -25,10 +26,19 @@ public final class AgentSession: ObservableObject {
     @Published public private(set) var lastResolved: ResolvedDirective?
     /// What the server said it can do, read from `ready` rather than discovered by failure.
     @Published public private(set) var capabilities = Capabilities()
+    /// True when the server recognised the offered session id and kept the transcript.
+    @Published public private(set) var didResumeSession = false
     /// Last ambient event the home pushed unprompted (PRD §4).
     @Published public private(set) var lastAmbient: AmbientNotice?
     /// Set when the agent asks the user to name a place; cleared once it is named.
     @Published public private(set) var placeRequest: PlaceRequest?
+    /// Mirrors `confirmations.pending`.
+    ///
+    /// A view observing `AgentSession` is not observing the gate inside it: nested
+    /// `ObservableObject`s do not propagate, so the confirmation ornament silently never
+    /// rendered even though the gate was holding a pending unlock. Republishing here is
+    /// what makes the prompt appear.
+    @Published public private(set) var pendingConfirmations: [PendingConfirmation] = []
 
     public let confirmations = ConfirmationGate()
     public let places: NamedPlaceStore
@@ -53,6 +63,7 @@ public final class AgentSession: ObservableObject {
     private var signalSink: ((CharacterEvent) -> Void)?
     /// Mirrors the renderer's machine so views can observe state without touching RealityKit.
     private var machine = CharacterStateMachine()
+    private var cancellables: Set<AnyCancellable> = []
 
     /// Defaults are constructed inside the initializer rather than as default arguments:
     /// both collaborators are `@MainActor`, and a default argument is evaluated in a
@@ -65,6 +76,11 @@ public final class AgentSession: ObservableObject {
         self.channel = channel ?? WebSocketAgentChannel()
         self.home = home ?? RemoteHomeProvider()
         self.places = places ?? NamedPlaceStore()
+
+        confirmations.$pending
+            .receive(on: RunLoop.main)
+            .sink { [weak self] in self?.pendingConfirmations = $0 }
+            .store(in: &cancellables)
     }
 
     // MARK: Wiring
@@ -165,6 +181,7 @@ public final class AgentSession: ObservableObject {
                 return
             }
             self.capabilities = capabilities
+            didResumeSession = resumed
             connection = .connected(sessionId: sessionId, model: model)
             // A resumed session is mid-thought: the character picks up attention rather
             // than starting from cold idle.
@@ -198,6 +215,11 @@ public final class AgentSession: ObservableObject {
                 serverSafety: safety,
                 executedBy: executedBy
             )
+
+        case let .homeDevices(devices):
+            // The Mac owns the home; this is the only way the headset learns a device's
+            // name, which is what a confirmation prompt has to show.
+            (home as? RemoteHomeProvider)?.ingest(devices)
 
         case let .ambientEvent(source, kind, interrupt, text):
             lastAmbient = AmbientNotice(

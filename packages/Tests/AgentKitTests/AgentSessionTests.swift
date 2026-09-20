@@ -364,4 +364,27 @@ final class AgentSessionTests: XCTestCase {
         await settle()
         XCTAssertFalse(session.transcript.last?.text.contains("disconnected") ?? true)
     }
+
+    /// The view observes the session, not the gate inside it. Without this mirror the
+    /// confirmation ornament never renders and an unsafe call sits invisible until it
+    /// times out — which is exactly how it failed in the simulator.
+    func testPendingConfirmationsAreRepublishedOnTheSession() async {
+        let (session, channel) = makeSession(home: MockHomeProvider())
+        channel.emit(.ready(sessionId: "s1", protocolVersion: 1, model: "m", capabilities: Capabilities(), resumed: false))
+        await settle()
+
+        channel.emit(
+            .toolCall(
+                callId: "t11", name: "set_lock",
+                args: ["device_id": .string("lock.front"), "locked": .bool(false)],
+                safety: .unsafe, executedBy: .server
+            )
+        )
+        await settle()
+        XCTAssertEqual(session.pendingConfirmations.map(\.id), ["t11"])
+
+        session.confirmations.confirm("t11")
+        await settle()
+        XCTAssertTrue(session.pendingConfirmations.isEmpty)
+    }
 }

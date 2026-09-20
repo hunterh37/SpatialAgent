@@ -8,6 +8,7 @@ one socket.
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -33,7 +34,9 @@ from .protocol import (
     UtteranceEnd,
 )
 from .thinking import ThinkingFilter
-from .tools import ASK_FOR_PLACE, ToolRegistry
+from .tools import ASK_FOR_PLACE, LOOK_AT, WALK_TO, ToolRegistry
+
+log = logging.getLogger("agentd.session")
 
 MAX_TURNS = 40
 # A tool result has to go back through the model, or the character reports "done" without
@@ -55,7 +58,8 @@ class Session:
         self.tools = tools
         self.executor: ToolExecutor = executor or ClientExecutor()
         self.scene = SceneSnapshot()
-        self.devices: list[Device] = []
+        # A server-owned home is known before any client connects.
+        self.devices: list[Device] = self.server_devices()
         self.history: list[dict[str, Any]] = []
         self.pending = PendingCalls()
         self.ambient = AmbientBus()
@@ -63,6 +67,19 @@ class Session:
         # Places the agent has already asked about, so it stops asking (todo 3).
         self.requested_places: set[str] = set()
         self._pending_names: dict[str, str] = {}
+
+    def server_devices(self) -> list[Device]:
+        """What this machine holds, when this machine is the one executing. Empty when the
+        headset owns the home."""
+        devices = getattr(self.executor, "devices", None)
+        return list(devices()) if callable(devices) else []
+
+    def adopt_server_devices(self) -> list[Device]:
+        """Server-owned devices are the session's device list; the client has none to send."""
+        devices = self.server_devices()
+        if devices:
+            self.devices = devices
+        return devices
 
     def capabilities(self) -> Capabilities:
         return Capabilities(
@@ -84,7 +101,15 @@ class Session:
         self.touch()
 
     def update_devices(self, devices: list[Device]) -> list[AmbientEvent]:
-        """Returns the ambient events this snapshot earned, after rate limiting."""
+        """Returns the ambient events this snapshot earned, after rate limiting.
+
+        When this machine owns the home, its own list is authoritative. A visionOS client
+        has no HomeKit at all and sends an empty snapshot; taking that at face value wiped
+        the devices out of the prompt and the model then had nothing it could act on.
+        """
+        if self.executor.location == "server" and self.server_devices():
+            return []
+
         events: list[AmbientEvent] = []
         if self.devices:
             for source, kind, text in diff_devices(self.devices, devices):
@@ -184,8 +209,21 @@ class Session:
         emitted_places: set[str] | None = None,
     ) -> AsyncIterator[ServerEvent]:
         """One tool call: announce it, get it fulfilled, write the result into history."""
+        # Character tools move the body or ask a question. They never reach an executor,
+        # and they are how movement becomes a decision the model states outright rather
+        # than something inferred from its prose.
         if name == ASK_FOR_PLACE:
             async for event in self._ask_for_place(args):
+                yield event
+            return
+
+        if name == WALK_TO:
+            async for event in self._walk_to(args, emitted_places):
+                yield event
+            return
+
+        if name == LOOK_AT:
+            async for event in self._look_at(args):
                 yield event
             return
 
@@ -205,6 +243,9 @@ class Session:
             )
 
         self._pending_names[call_id] = name
+        # One line per action, because "the model did nothing" and "the model did the wrong
+        # thing" look identical from outside.
+        log.info("tool %s %s safety=%s by=%s", name, args, safety, self.executor.location)
         yield ToolCall(
             callId=call_id,
             name=name,
@@ -217,6 +258,55 @@ class Session:
         self._record(call_id, outcome)
         for device in _devices_in(outcome.payload):
             self._merge_device(device)
+
+    async def _walk_to(
+        self, args: dict[str, Any], emitted_places: set[str] | None
+    ) -> AsyncIterator[ServerEvent]:
+        requested = str(args.get("place", "")).strip()
+        place = self._known_place(requested)
+        if place is None:
+            # A place the client never sent cannot be walked to, whatever the model says.
+            self.history.append(
+                {
+                    "role": "tool",
+                    "name": WALK_TO,
+                    "content": _compact(
+                        {"error": f"no such place: {requested}",
+                         "places": self.scene.place_names()}
+                    ),
+                }
+            )
+            return
+
+        if emitted_places is not None:
+            if place in emitted_places:
+                return
+            emitted_places.add(place)
+
+        self.history.append(
+            {"role": "tool", "name": WALK_TO, "content": _compact({"walking_to": place})}
+        )
+        log.info("walkTo %s", place)
+        yield Directive(directive=CharacterDirective(kind="walkTo", place=place, target="place"))
+
+    async def _look_at(self, args: dict[str, Any]) -> AsyncIterator[ServerEvent]:
+        target = str(args.get("target", "user")).strip()
+        place = self._known_place(target)
+        directive = (
+            CharacterDirective(kind="lookAt", place=place, target="place")
+            if place
+            else CharacterDirective(kind="lookAt", target="user")
+        )
+        self.history.append(
+            {"role": "tool", "name": LOOK_AT, "content": _compact({"looking_at": place or "user"})}
+        )
+        yield Directive(directive=directive)
+
+    def _known_place(self, name: str) -> str | None:
+        lowered = name.strip().lower()
+        if not lowered:
+            return None
+        return next((p.name for p in self.scene.places if p.name.lower() == lowered), None)
 
     async def _ask_for_place(self, args: dict[str, Any]) -> AsyncIterator[ServerEvent]:
         name = str(args.get("name", "")).strip()
