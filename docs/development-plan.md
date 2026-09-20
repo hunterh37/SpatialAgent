@@ -304,6 +304,10 @@ Done: no taught record is ever lost without the user choosing it.
 
 Test: `SpatialMemoryTests.testTeachingInsideAnExistingPlaceNeverSilentlyOverwrites`.
 
+Status: done — `SemanticMap.needsDisambiguation` is the one place that decides, both answers
+(rename, nest) are covered by the named test, `AgentSession.TeachingAnswer` has exactly two
+cases, and the prompt tells the model to ask once and never overwrite.
+
 ### C5 — Map inspector
 
 New: `apps/SpatialAgent/Sources/MapInspectorView.swift`, `DesignSystem/MapRow.swift`.

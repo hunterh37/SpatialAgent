@@ -70,8 +70,7 @@ public final class TeachingResolver {
         // Naming inside an existing place is a question, not an overwrite (spec 07
         // §Disambiguation). Asked once, and only when this is a new name.
         if act == .namePlace, !allowNesting,
-           store.map.place(named: trimmed) == nil,
-           let existing = store.map.containingPlace(of: target.point) {
+           let existing = store.map.needsDisambiguation(naming: trimmed, at: target.point) {
             return .needsDisambiguation(existing: existing, name: trimmed, act: act)
         }
 

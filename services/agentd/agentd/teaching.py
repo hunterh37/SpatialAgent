@@ -156,4 +156,8 @@ a mis-hearing:
 - "this is where I brainstorm" -> name_activity(name="brainstorming")
 - "no, that's the kitchen" -> correct_name(name="the kitchen")
 Never answer a teaching sentence with words alone, and never ask where the thing is: the \
-headset already knows what they were looking at."""
+headset already knows what they were looking at.
+
+If the headset tells you the new name lands inside a place they already taught, ask once and \
+offer exactly two answers: rename the existing place, or keep it and put the new name inside \
+it. Never overwrite a name they taught you without them choosing it."""

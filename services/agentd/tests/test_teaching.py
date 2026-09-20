@@ -180,3 +180,23 @@ def test_the_prompt_tells_the_model_to_call_a_tool_not_narrate() -> None:
     for tool in TEACHING_TOOLS:
         assert tool in prompt
     assert "Never answer a teaching sentence with words alone" in prompt
+
+
+# --- disambiguation --------------------------------------------------------------------
+
+
+def test_the_prompt_offers_exactly_two_answers_to_a_name_collision() -> None:
+    from agentd.prompt import build_system_prompt
+    from agentd.protocol import SceneSnapshot
+
+    prompt = build_system_prompt(SceneSnapshot(places=[]), [])
+    assert "exactly two answers" in prompt
+    assert "Never overwrite a name they taught you without them choosing it." in prompt
+
+
+async def test_a_correction_is_still_one_act_not_a_second_record() -> None:
+    # The correction act carries only the corrected name; which record it re-targets is the
+    # client's business, because the client is the only side that knows what was just taught.
+    calls = teaching_calls(await drive("no, that's the kitchen", call(CORRECT_NAME, name="kitchen")))
+    assert calls[0].name == CORRECT_NAME
+    assert set(calls[0].args) == {"name"}

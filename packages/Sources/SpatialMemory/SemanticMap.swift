@@ -157,6 +157,23 @@ public struct SemanticMap: Codable, Hashable, Sendable {
         places.filter { $0.contains(point) }.min { $0.radius < $1.radius }
     }
 
+    /// Whether teaching `name` at `point` can be written without asking the user first.
+    ///
+    /// Spec 07 §Disambiguation: naming inside an existing place's radius asks once, and the
+    /// answers are exactly two — rename the existing place, or nest a new object within it.
+    /// Silent overwriting of a taught record is prohibited; the user spent effort on it.
+    public func needsDisambiguation(naming name: String, at point: SIMD3<Float>) -> Place? {
+        // Re-teaching the same name is a correction of that record, not a collision with a
+        // different one, so it never asks.
+        guard place(named: name) == nil else { return nil }
+        return containingPlace(of: point)
+    }
+
+    /// Objects nested inside a place, which is what the second answer produces.
+    public func nestedObjects(in place: Place) -> [MapObject] {
+        objects.filter { $0.placeId == place.id || place.contains($0.position) }
+    }
+
     /// Every place whose radius covers the point. Teaching inside one of these is what
     /// triggers the disambiguation question in C4.
     public func placesContaining(_ point: SIMD3<Float>) -> [Place] {

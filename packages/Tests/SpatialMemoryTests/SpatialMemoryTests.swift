@@ -217,6 +217,46 @@ final class SemanticMapTests: XCTestCase {
         XCTAssertTrue(map.episodes.isEmpty)
     }
 
+    // MARK: Disambiguation (spec 07 §Disambiguation)
+
+    func testTeachingInsideAnExistingPlaceNeverSilentlyOverwrites() {
+        var map = SemanticMap()
+        map.upsert(Place(name: "the study", position: .zero, radius: 1.5))
+        let inside = SIMD3<Float>(0.4, 0, 0.2)
+
+        // Naming something else inside it is a question, not a write.
+        let clash = map.needsDisambiguation(naming: "the desk", at: inside)
+        XCTAssertEqual(clash?.name, "the study")
+        XCTAssertEqual(map.places.count, 1)
+        XCTAssertNotNil(map.place(named: "the study"))
+
+        // Answer one: rename the existing place. One record, the new name, same identity.
+        var renamed = map
+        let studyId = try! XCTUnwrap(renamed.place(named: "the study")).id
+        XCTAssertTrue(renamed.rename(placeId: studyId, to: "the desk"))
+        XCTAssertEqual(renamed.places.count, 1)
+        XCTAssertEqual(renamed.place(named: "the desk")?.id, studyId)
+
+        // Answer two: nest an object inside it. Both records survive.
+        var nested = map
+        nested.upsert(MapObject(name: "the desk", position: inside, placeId: studyId))
+        XCTAssertNotNil(nested.place(named: "the study"))
+        XCTAssertNotNil(nested.object(named: "the desk"))
+        XCTAssertEqual(nested.nestedObjects(in: nested.places[0]).count, 1)
+    }
+
+    func testReTeachingTheSameNameDoesNotAsk() {
+        var map = SemanticMap()
+        map.upsert(Place(name: "the study", position: .zero, radius: 1.5))
+        XCTAssertNil(map.needsDisambiguation(naming: "The Study", at: SIMD3(0.2, 0, 0)))
+    }
+
+    func testNamingOutsideEveryPlaceDoesNotAsk() {
+        var map = SemanticMap()
+        map.upsert(Place(name: "the study", position: .zero, radius: 0.5))
+        XCTAssertNil(map.needsDisambiguation(naming: "the kitchen", at: SIMD3(4, 0, 4)))
+    }
+
     // MARK: Persistence round trip
 
     func testRoundTripsThroughJSON() throws {
