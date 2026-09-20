@@ -40,7 +40,21 @@ struct ImmersiveView: View {
                 onSignal: { character.signal($0) }
             )
 
+            // The inspector's selection, drawn where the record actually is.
+            let highlight = ModelEntity(
+                mesh: .generateSphere(radius: 0.06),
+                materials: [UnlitMaterial(color: .cyan)]
+            )
+            highlight.isEnabled = false
+            root.addChild(highlight)
+
             _ = content.subscribe(to: SceneEvents.Update.self) { _ in
+                if let position = model.highlightedRecord {
+                    highlight.position = SIMD3(position.x, position.y + 0.06, position.z)
+                    highlight.isEnabled = true
+                } else {
+                    highlight.isEnabled = false
+                }
                 let now = CACurrentMediaTime()
                 let delta = Float(min(now - lastUpdate, 0.1))
                 lastUpdate = now

@@ -3,6 +3,7 @@ import AgentTransport
 import DesignSystem
 import HomeBridge
 import SwiftUI
+import simd
 import VoiceInput
 
 /// The 2D control surface: connection, the transcript, and the text field that stands in for
@@ -16,6 +17,7 @@ struct ContentView: View {
     @StateObject private var voice = SpeechCapture()
     @State private var draft = ""
     @State private var manualHost = ""
+    @State private var showingMap = false
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -48,6 +50,19 @@ struct ContentView: View {
             if focused { session.addressed() }
         }
         .overlay(alignment: .bottom) { confirmationOrnament }
+        .sheet(isPresented: $showingMap) {
+            MapInspectorView(highlighted: highlightBinding)
+                .environmentObject(session)
+        }
+    }
+
+    /// The inspector writes the highlight into the app model so the immersive view can draw
+    /// it; the sheet and the room are two windows onto one selection.
+    private var highlightBinding: Binding<SIMD3<Float>?> {
+        Binding(
+            get: { model.highlightedRecord },
+            set: { model.highlightedRecord = $0 }
+        )
     }
 
     private var header: some View {
@@ -58,6 +73,8 @@ struct ContentView: View {
                     .accessibilityIdentifier("connection.label")
             }
             Spacer()
+            Button("What I know") { showingMap = true }
+                .accessibilityIdentifier("map.open")
             Toggle("In the room", isOn: spaceBinding)
                 .toggleStyle(.button)
                 .accessibilityIdentifier("space.toggle")

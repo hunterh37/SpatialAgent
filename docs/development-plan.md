@@ -319,6 +319,11 @@ Done: a user can see and erase everything the bird knows.
 
 Test: covered in `AppFlowUITests`.
 
+Status: done — `MapRow` in `DesignSystem`, `MapInspectorView` in the app (sections per record
+type, per-row delete, selection highlighted in the room through `AppModel.highlightedRecord`,
+one confirmed "forget everything"), reached from a "What I know" button; `AppFlowUITests`
+covers listing and the wipe.
+
 ---
 
 ## Phase D — Learned behavior

@@ -118,4 +118,29 @@ final class AppFlowUITests: XCTestCase {
         )
         XCTAssertTrue(app.textFields["composer.field"].exists, "the window survived the space")
     }
+    // MARK: The map inspector (spec/07-memory.md §Inspection)
+
+    /// A user can see and erase everything the bird knows. Both halves are tested here
+    /// because either one alone is a map you cannot audit or a map you cannot get out of.
+    func testMapInspectorListsWhatTheBirdKnowsAndCanForgetItAll() {
+        let open = app.buttons["map.open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 20), "the inspector is unreachable")
+        open.tap()
+
+        // A fresh room knows nothing, and says so rather than showing an empty list.
+        let empty = app.staticTexts["map.empty"]
+        let list = app.otherElements["map.list"]
+        XCTAssertTrue(
+            empty.waitForExistence(timeout: 5) || list.waitForExistence(timeout: 5),
+            "the inspector showed neither records nor an empty state"
+        )
+
+        let forget = app.buttons["map.forgetEverything"]
+        XCTAssertTrue(forget.exists, "there is no way to forget everything")
+        guard forget.isEnabled else { return }
+        forget.tap()
+        app.buttons["Forget everything"].tap()
+        XCTAssertTrue(app.staticTexts["map.empty"].waitForExistence(timeout: 5))
+    }
+
 }

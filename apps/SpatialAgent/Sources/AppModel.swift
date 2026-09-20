@@ -18,6 +18,10 @@ final class AppModel {
     /// Set when placement finds no valid floor point. The app says so rather than placing
     /// the character badly (spec/05-scene.md).
     var placementProblem: String?
+    /// Position of the taught record selected in the map inspector, highlighted in the room
+    /// so "which desk did I call that" is answerable by looking (spec/07-memory.md
+    /// §Inspection).
+    var highlightedRecord: SIMD3<Float>?
 
     let discovery = AgentDiscovery()
     let session: AgentSession
