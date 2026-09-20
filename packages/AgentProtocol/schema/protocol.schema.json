@@ -1,0 +1,180 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spatialagent.dev/schema/protocol.json",
+  "title": "SpatialAgent wire protocol",
+  "description": "Source of truth. Swift and Python types are generated from this file.",
+  "definitions": {
+    "ProtocolVersion": { "const": 1 },
+
+    "Vec3": {
+      "type": "object",
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" }
+      }
+    },
+
+    "NamedPlace": {
+      "type": "object",
+      "required": ["name", "position", "radius"],
+      "properties": {
+        "name": { "type": "string" },
+        "position": { "$ref": "#/definitions/Vec3" },
+        "radius": { "type": "number", "minimum": 0.1 }
+      }
+    },
+
+    "SceneSnapshot": {
+      "type": "object",
+      "required": ["places"],
+      "properties": {
+        "places": { "type": "array", "items": { "$ref": "#/definitions/NamedPlace" } },
+        "floorArea": { "type": "number" },
+        "userPosition": { "$ref": "#/definitions/Vec3" }
+      }
+    },
+
+    "DeviceKind": {
+      "enum": ["light", "lock", "thermostat", "cover", "sensor", "scene", "media", "other"]
+    },
+
+    "Device": {
+      "type": "object",
+      "required": ["id", "name", "kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "room": { "type": ["string", "null"] },
+        "kind": { "$ref": "#/definitions/DeviceKind" },
+        "state": { "type": "object", "additionalProperties": true },
+        "capabilities": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "Safety": { "enum": ["safe", "unsafe"] },
+
+    "DirectiveKind": {
+      "enum": ["walkTo", "lookAt", "point", "emote", "gesture", "idle"]
+    },
+
+    "CharacterDirective": {
+      "description": "Symbolic intent only. Never animation names, never raw coordinates.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "$ref": "#/definitions/DirectiveKind" },
+        "place": { "type": ["string", "null"], "description": "Named place from SceneSnapshot" },
+        "target": { "enum": ["user", "place", "device", null] },
+        "deviceId": { "type": ["string", "null"] },
+        "emotion": { "enum": ["neutral", "confused", "happy", "concerned", "thinking", null] }
+      }
+    },
+
+    "ClientMessage": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "enum": ["hello", "userUtterance", "sceneUpdate", "deviceStates", "toolResult", "ping"] } },
+      "oneOf": [
+        {
+          "properties": {
+            "type": { "const": "hello" },
+            "protocolVersion": { "$ref": "#/definitions/ProtocolVersion" },
+            "client": { "type": "string" }
+          },
+          "required": ["protocolVersion", "client"]
+        },
+        {
+          "properties": {
+            "type": { "const": "userUtterance" },
+            "id": { "type": "string" },
+            "text": { "type": "string" }
+          },
+          "required": ["id", "text"]
+        },
+        {
+          "properties": {
+            "type": { "const": "sceneUpdate" },
+            "scene": { "$ref": "#/definitions/SceneSnapshot" }
+          },
+          "required": ["scene"]
+        },
+        {
+          "properties": {
+            "type": { "const": "deviceStates" },
+            "devices": { "type": "array", "items": { "$ref": "#/definitions/Device" } }
+          },
+          "required": ["devices"]
+        },
+        {
+          "properties": {
+            "type": { "const": "toolResult" },
+            "callId": { "type": "string" },
+            "ok": { "type": "boolean" },
+            "payload": { "type": "object", "additionalProperties": true },
+            "error": { "type": ["string", "null"] }
+          },
+          "required": ["callId", "ok"]
+        },
+        { "properties": { "type": { "const": "ping" } } }
+      ]
+    },
+
+    "ServerEvent": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "enum": ["ready", "token", "utteranceEnd", "characterDirective", "toolCall", "error", "pong"] } },
+      "oneOf": [
+        {
+          "properties": {
+            "type": { "const": "ready" },
+            "sessionId": { "type": "string" },
+            "protocolVersion": { "$ref": "#/definitions/ProtocolVersion" },
+            "model": { "type": "string" }
+          },
+          "required": ["sessionId", "protocolVersion", "model"]
+        },
+        {
+          "properties": {
+            "type": { "const": "token" },
+            "utteranceId": { "type": "string" },
+            "text": { "type": "string" }
+          },
+          "required": ["utteranceId", "text"]
+        },
+        {
+          "properties": {
+            "type": { "const": "utteranceEnd" },
+            "utteranceId": { "type": "string" }
+          },
+          "required": ["utteranceId"]
+        },
+        {
+          "properties": {
+            "type": { "const": "characterDirective" },
+            "directive": { "$ref": "#/definitions/CharacterDirective" }
+          },
+          "required": ["directive"]
+        },
+        {
+          "properties": {
+            "type": { "const": "toolCall" },
+            "callId": { "type": "string" },
+            "name": { "type": "string" },
+            "args": { "type": "object", "additionalProperties": true },
+            "safety": { "$ref": "#/definitions/Safety" }
+          },
+          "required": ["callId", "name", "safety"]
+        },
+        {
+          "properties": {
+            "type": { "const": "error" },
+            "code": { "type": "string" },
+            "message": { "type": "string" }
+          },
+          "required": ["code", "message"]
+        },
+        { "properties": { "type": { "const": "pong" } } }
+      ]
+    }
+  }
+}

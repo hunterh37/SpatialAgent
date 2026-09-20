@@ -1,0 +1,43 @@
+# One-bedroom apartment. The default fixture for headless development.
+name: apartment
+scene:
+  floorArea: 46.0
+  userPosition: { x: 0.0, y: 0.0, z: 0.0 }
+  places:
+    - name: kitchen
+      position: { x: 2.4, y: 0.0, z: -1.8 }
+      radius: 0.9
+    - name: desk
+      position: { x: -1.6, y: 0.0, z: -2.2 }
+      radius: 0.6
+    - name: couch
+      position: { x: 0.2, y: 0.0, z: 1.4 }
+      radius: 0.8
+    - name: front door
+      position: { x: -3.1, y: 0.0, z: 0.4 }
+      radius: 0.5
+devices:
+  - id: light.kitchen
+    name: Kitchen Lights
+    room: kitchen
+    kind: light
+    state: { "on": true, brightness: 80 }
+    capabilities: [on_off, brightness]
+  - id: light.desk
+    name: Desk Lamp
+    room: office
+    kind: light
+    state: { "on": false, brightness: 0 }
+    capabilities: [on_off, brightness]
+  - id: lock.front
+    name: Front Door
+    room: entry
+    kind: lock
+    state: { locked: true }
+    capabilities: [lock_unlock]
+  - id: sensor.doorbell
+    name: Doorbell
+    room: entry
+    kind: sensor
+    state: { ringing: false }
+    capabilities: [motion]

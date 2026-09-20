@@ -1,0 +1,7 @@
+# No named places, no devices. Exercises the degraded path: the agent must say it cannot
+# walk anywhere rather than inventing a destination.
+name: empty_room
+scene:
+  floorArea: 12.0
+  places: []
+devices: []
