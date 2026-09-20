@@ -14,7 +14,8 @@ struct SpatialAgentApp: App {
                 .environmentObject(model.session)
         }
         .windowStyle(.plain)
-        .defaultSize(width: 520, height: 640)
+        .defaultSize(width: 1100, height: 760)
+        .windowResizability(.contentMinSize)
 
         ImmersiveSpace(id: AppModel.immersiveSpaceId) {
             ImmersiveView()

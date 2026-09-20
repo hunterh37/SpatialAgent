@@ -3,6 +3,7 @@ import CharacterKit
 import DesignSystem
 import RealityKit
 import SceneUnderstanding
+import SpatialMemory
 import SwiftUI
 import simd
 
@@ -20,11 +21,16 @@ struct ImmersiveView: View {
     /// Hand tracking runs its own ARKit session; the scene provider's session owns world and
     /// plane data and has a different lifetime (it survives leaving the immersive space).
     @State private var hands = HandTrackingSession()
+    /// The grabbable blue landmark spheres, and which one a pinch currently owns.
+    @State private var markers = LandmarkMarkers()
+    @State private var dragging: String?
+    @State private var dragStart: SIMD3<Float>?
 
     var body: some View {
         RealityView { content, attachments in
             let root = Entity()
             root.addChild(character.root)
+            root.addChild(markers.root)
             content.add(root)
 
             // Nothing to load: the bird is generated from primitives at init (spec 06).
@@ -72,6 +78,7 @@ struct ImmersiveView: View {
                 } else {
                     highlight.isEnabled = false
                 }
+                markers.sync(to: session.landmarks?.markers ?? [], dragging: dragging)
                 let now = CACurrentMediaTime()
                 let delta = Float(min(now - lastUpdate, 0.1))
                 lastUpdate = now
@@ -86,6 +93,10 @@ struct ImmersiveView: View {
 
                 character.update(deltaTime: delta, userPosition: model.scene.userPosition)
                 session.characterPosition = character.position
+                // Presence: once the conversation has been over long enough, the bird walks
+                // back to the taught home perch. The policy is `IdleReturn`; this only says
+                // when to ask.
+                session.tickIdle()
             }
         } attachments: {
             Attachment(id: "bubble") {
@@ -96,7 +107,39 @@ struct ImmersiveView: View {
         }
         .gesture(
             // Tapping the character is the v0.1 stand-in for gaze addressing.
-            SpatialTapGesture().targetedToAnyEntity().onEnded { _ in session.addressed() }
+            SpatialTapGesture().targetedToAnyEntity().onEnded { value in
+                guard markers.presetId(for: value.entity) == nil else { return }
+                session.addressed()
+            }
+        )
+        // Grab a landmark sphere and move it. The map is written once, on release: a drag
+        // is one correction, not sixty anchor writes.
+        .gesture(
+            DragGesture()
+                .targetedToAnyEntity()
+                .onChanged { value in
+                    guard let id = markers.presetId(for: value.entity) else { return }
+                    if dragging != id {
+                        dragging = id
+                        dragStart = markers.position(of: id)
+                    }
+                    guard let start = dragStart else { return }
+                    let translation = value.convert(
+                        value.translation3D, from: .local, to: .scene
+                    )
+                    markers.setPosition(start + SIMD3<Float>(translation), for: id)
+                }
+                .onEnded { value in
+                    guard
+                        let id = dragging,
+                        let preset = LandmarkPreset.preset(id: id),
+                        let point = markers.position(of: id)
+                    else { return }
+                    _ = value
+                    dragging = nil
+                    dragStart = nil
+                    Task { await session.landmarks?.move(preset, to: point) }
+                }
         )
     }
 

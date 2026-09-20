@@ -33,7 +33,8 @@ public struct TeachingResponse: Equatable, Sendable {
         switch act {
         case .namePlace, .nameObject, .nameActivity: return .curious
         case .forbidRegion: return .scolded
-        case .correctName: return .happy
+        // Being given a home is the one act that is about the bird, not about the room.
+        case .correctName, .setHomePerch: return .happy
         }
     }
 
@@ -42,6 +43,7 @@ public struct TeachingResponse: Equatable, Sendable {
         case .namePlace, .nameObject, .nameActivity: return "Okay — \(name)."
         case .forbidRegion: return name.isEmpty ? "Okay. Not there." : "Okay. Not \(name)."
         case .correctName: return "Got it — \(name) now."
+        case .setHomePerch: return name.isEmpty ? "Okay — I'll wait here." : "Okay — I'll wait at \(name)."
         }
     }
 

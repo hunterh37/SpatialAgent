@@ -243,3 +243,35 @@ def test_an_empty_client_snapshot_does_not_wipe_a_server_owned_home() -> None:
     assert [d.id for d in session.devices] == [
         "light.kitchen", "light.desk", "lock.front", "sensor.doorbell"
     ]
+
+
+# --- memory over HTTP -------------------------------------------------------
+# The profile is only "owned by the user" if it is reachable without the model in the way.
+
+
+def test_memory_can_be_listed_added_edited_and_deleted():
+    from fastapi.testclient import TestClient
+
+    from agentd.adapters import EchoAdapter
+    from agentd.server import create_app
+
+    client = TestClient(create_app(EchoAdapter(delay=0.0)))
+
+    added = client.post("/memory", json={"text": "drinks oat milk", "slot": "diet"}).json()
+    assert added["ok"]
+    fact_id = added["fact"]["id"]
+
+    assert any(f["id"] == fact_id for f in client.get("/memory").json()["facts"])
+    assert client.patch(f"/memory/{fact_id}", json={"text": "drinks soy milk"}).json()["ok"]
+    assert client.get("/memory", params={"q": "soy"}).json()["facts"][0]["text"] == (
+        "drinks soy milk"
+    )
+
+    exported = client.get("/memory/export").json()
+    assert exported["schema"] == 1
+
+    assert client.delete(f"/memory/{fact_id}").json()["ok"]
+    assert client.get("/memory").json()["count"] == 0
+
+    # Portability: the export puts it back.
+    assert client.post("/memory/import", json=exported).json()["added"] == 1

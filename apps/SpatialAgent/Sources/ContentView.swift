@@ -19,15 +19,18 @@ struct ContentView: View {
     @State private var draft = ""
     @State private var manualHost = ""
     @State private var showingMap = false
+    @State private var showingLandmarks = false
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
             LarryCard(tint: Larry.sky) { transcript }
+            demoChips
             composer
         }
         .padding(22)
+        .frame(minWidth: 900, idealWidth: 1100, minHeight: 620, idealHeight: 760)
         .background(
             LinearGradient(
                 colors: [Larry.grape.opacity(0.22), Larry.sky.opacity(0.10)],
@@ -57,6 +60,9 @@ struct ContentView: View {
             if focused { session.addressed() }
         }
         .overlay(alignment: .bottom) { confirmationOrnament }
+        .sheet(isPresented: $showingLandmarks) {
+            LandmarkSetupView().environmentObject(session)
+        }
         .sheet(isPresented: $showingMap) {
             MapInspectorView(highlighted: highlightBinding)
                 .environmentObject(session)
@@ -78,7 +84,9 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(Larry.name).font(.largeTitle.weight(.heavy))
+                        .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                     Text(Larry.tagline).font(.caption).foregroundStyle(Larry.mint)
+                        .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                 }
                 Text(connectionLabel).font(.caption).foregroundStyle(.secondary)
                     .accessibilityIdentifier("connection.label")
@@ -86,15 +94,26 @@ struct ContentView: View {
             }
             Spacer()
             Button {
+                showingLandmarks = true
+            } label: {
+                Label("Landmarks", systemImage: "mappin.and.ellipse")
+                    .lineLimit(1).fixedSize()
+            }
+            .buttonStyle(.bordered)
+            .tint(Larry.sky)
+            .accessibilityIdentifier("landmarks.open")
+            Button {
                 showingMap = true
             } label: {
                 Label("What I know", systemImage: "backpack.fill")
+                    .lineLimit(1).fixedSize()
             }
             .buttonStyle(.bordered)
             .tint(Larry.mint)
             .accessibilityIdentifier("map.open")
             Toggle("In the room", isOn: spaceBinding)
                 .toggleStyle(.button)
+                .lineLimit(1).fixedSize()
                 .tint(Larry.bubblegum)
                 .accessibilityIdentifier("space.toggle")
         }
@@ -184,6 +203,33 @@ struct ContentView: View {
         }
         .padding(10)
         .background(Larry.grape.opacity(0.14), in: .capsule)
+    }
+
+    /// Canned utterances, sent verbatim through the same path the text field uses. The
+    /// strings live in `DemoScenarios` so the demo script is data rather than view code.
+    private var demoChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 18) {
+                ForEach(DemoScenarios.all) { group in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(group.title, systemImage: group.symbol)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Larry.mint)
+                        HStack(spacing: 6) {
+                            ForEach(group.prompts) { prompt in
+                                Button(prompt.label) { session.send(utterance: prompt.utterance) }
+                                    .buttonStyle(.bordered)
+                                    .tint(Larry.grape)
+                                    .font(.caption)
+                                    .accessibilityIdentifier("demo.chip")
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .frame(maxHeight: 76)
     }
 
     /// Cosmetic only: Larry "levels up" every five exchanges so the window has a reason to

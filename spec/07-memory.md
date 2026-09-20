@@ -137,8 +137,40 @@ immediate and complete — including from episodes.
 "Forget everything" exists, is one action, and re-hatches the bird in the same room with no
 names. A map that cannot be audited or erased is not something to put a door lock behind.
 
+## The profile: memory of the person
+
+The map remembers the room. The profile remembers the user, and it is the only memory that
+lives on the server, because it contains no coordinate and nothing that needs one.
+
+A fact is a short sentence in the user's own words, plus a slot (identity, routine,
+preference, diet, people, place_meaning, project, boundary, misc), a source (`user`,
+`inferred`, `seed`), the curiosity question it answered if any, and the name — never the
+position — of a place it is about. Facts are deduplicated on normalized text, so being told
+the same thing twice is one memory, and corrected in place, so a correction keeps the id
+rather than leaving a contradiction behind.
+
+The model changes it only through declared tools — `remember_about_user`, `recall_about_user`,
+`forget_about_user`, `update_about_user`, `ask_about_user` — for the same reason walking is a
+tool: a change to the user's memory that nobody declared is a change nobody can audit. Recall
+is scored token overlap, not an embedding, because "why did it remember that?" has to have an
+answer.
+
+Storage is one JSON file (`AGENTD_PROFILE`, default `~/.spatialagent/profile.json`), written
+atomically on every change. It is the user's file: `GET/POST/PATCH/DELETE /memory` and
+`/memory/export` + `/memory/import` make it inspectable, editable and portable without going
+through the model at all. A corrupt file is renamed, never discarded.
+
+The question engine is the supply side of this. Its bank is a set of generic seeds plus three
+questions per taught place, so the supply grows with the room and never runs out; the pacing
+rules in §Curiosity apply unchanged, and a question is asked once whether or not it was
+answered. An answer is banked by the session rather than by the model, because a 3B model
+drops the follow-up call often enough that asking and then forgetting would be the common
+case.
+
 ## Persistence
 
 Map records persist across sessions in on-device storage keyed by room, with anchors
-re-resolved on launch. `agentd` holds only the abstracted view for the life of the session
-and forgets on restart, which stays correct: coordinates never land on the server.
+re-resolved on launch. `agentd` holds only the abstracted view of the *map* for the life of
+the session and forgets it on restart, which stays correct: coordinates never land on the
+server. The profile is the deliberate exception and is the one thing that outlives the
+process, on disk, in a file the user can read.

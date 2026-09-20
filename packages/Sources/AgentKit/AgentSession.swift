@@ -48,6 +48,12 @@ public final class AgentSession: ObservableObject {
     /// act the client can complete.
     public private(set) var teaching: TeachingResolver?
     public private(set) var gaze: GazeCapture?
+    /// World-anchor bookkeeping for everything the user teaches or places. Present only
+    /// once a scene provider that can anchor is attached; without it a taught place is a
+    /// coordinate that drifts.
+    public private(set) var anchors: AnchorBinding?
+    /// The pre-demo landmark checklist's writer. Same records as teaching, different input.
+    public private(set) var landmarks: LandmarkPlacer?
     /// Set when a teaching act landed inside an existing place and the user has to choose
     /// between renaming it and nesting inside it (spec 07 §Disambiguation).
     @Published public private(set) var teachingQuestion: TeachingQuestion?
@@ -70,6 +76,8 @@ public final class AgentSession: ObservableObject {
     /// Id shared by the partial transcripts of the utterance currently being spoken.
     private var pendingPartialId: String?
     private var lastSceneSent: Date = .distantPast
+    /// When the character last entered idle. Nil while it is doing anything else.
+    private var idleSince: Date?
     private var directiveSink: ((ResolvedDirective) -> Void)?
     /// Affinity inputs, routed to the body. The session knows what happened; the entity owns
     /// how it feels about it.
@@ -115,12 +123,24 @@ public final class AgentSession: ObservableObject {
     public func attachGaze(_ caster: any GazeCasting) {
         let capture = GazeCapture(caster: caster)
         gaze = capture
-        teaching = TeachingResolver(store: places, gaze: capture)
+        teaching = TeachingResolver(store: places, gaze: capture, anchors: anchors)
     }
 
     public func attach(scene: any SceneProviding) {
         self.scene = scene
+        // Anchoring is attached before gaze because the teaching resolver takes the binding
+        // at construction: built in the other order, every taught place silently loses its
+        // world anchor and stops surviving a relaunch.
+        if let provider = scene as? any AnchorProviding {
+            anchors = AnchorBinding(store: places, provider: provider)
+        }
         if let caster = scene as? any GazeCasting { attachGaze(caster) }
+        landmarks = LandmarkPlacer(
+            store: places,
+            scene: scene,
+            gaze: gaze,
+            anchors: anchors
+        )
         scene.onMeshChanged = { [weak self] mesh in
             self?.sendSceneUpdate(floorArea: mesh.floorArea)
         }
@@ -334,10 +354,17 @@ public final class AgentSession: ObservableObject {
         let name = args?["name"]?.stringValue ?? ""
         let deviceId = args?["device_id"]?.stringValue
         let hard = args?["hard"]?.boolValue ?? true
+        // `set_home_perch` may name a place that already exists, in which case the act needs
+        // no gaze at all — the record it promotes already has a position.
+        let place = args?["place"]?.stringValue
 
         // Read before the act, because a completed act releases the held target.
-        let target = gaze?.target()?.point
-        let outcome = await teaching.apply(act, name: name, deviceId: deviceId, hard: hard)
+        var target = gaze?.target()?.point
+        let outcome = await teaching.apply(
+            act, name: name, deviceId: deviceId, hard: hard, place: place
+        )
+        // A promoted perch was never looked at, so the body follows the record instead.
+        if act == .setHomePerch, target == nil { target = places.map.homePerch?.position }
         acknowledgeOnTheBody(act, target: target)
         await report(outcome, callId: callId, act: act)
     }
@@ -516,7 +543,38 @@ public final class AgentSession: ObservableObject {
 
     private func signal(_ event: CharacterEvent) {
         signalSink?(event)
-        characterState = machine.handle(event)
+        let next = machine.handle(event)
+        // Idle is timed from the transition into it, not from the last frame: the bird has
+        // to have been left alone, not merely be standing still mid-answer.
+        if next == .idle, characterState != .idle { idleSince = Date() }
+        if next != .idle { idleSince = nil }
+        characterState = next
+    }
+
+    // MARK: Presence
+
+    /// Drives the return-to-perch policy. Called from the render loop, which is the only
+    /// place that knows where the body actually is; every decision it makes lives in
+    /// `IdleReturn` and `SemanticMap.homePerch` so none of it is in the app layer.
+    public func tickIdle(now: Date = Date()) {
+        guard let idleSince, let perch = places.map.homePerch, perch.isNavigable else { return }
+        guard IdleReturn.shouldReturn(
+            isIdle: characterState == .idle,
+            idleFor: now.timeIntervalSince(idleSince),
+            characterPosition: characterPosition,
+            perch: perch.position
+        ) else { return }
+        guard let path = scene?.navMesh?.path(from: characterPosition, to: perch.position) else {
+            // No route home is not worth retrying every frame; the next conversation
+            // restarts the clock.
+            self.idleSince = nil
+            return
+        }
+        // Cleared before emitting so one walk is issued per settle, not one per frame.
+        self.idleSince = nil
+        places.mutate { $0.noteUse(placeId: perch.id) }
+        places.record(Episode(placeId: perch.id, kind: .visited, summary: "settled on the perch"))
+        emit(.walk(path: path))
     }
 }
 

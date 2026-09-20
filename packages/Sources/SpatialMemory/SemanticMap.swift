@@ -224,6 +224,31 @@ public struct SemanticMap: Codable, Hashable, Sendable {
         return totalRecordCount < before
     }
 
+    /// Moves a place, and any rule taught under the same name, to a new point.
+    ///
+    /// The ids do not change: a desk that moved is the same desk, so episodes and objects
+    /// that point at it keep pointing at it. Returns false when the id is not a place.
+    @discardableResult
+    public mutating func move(
+        placeId: UUID,
+        to point: SIMD3<Float>,
+        anchorId: UUID? = nil,
+        hasRelocalized: Bool = true
+    ) -> Bool {
+        guard let index = places.firstIndex(where: { $0.id == placeId }) else { return false }
+        let key = places[index].nameKey
+        let anchor = AnchorRef(
+            anchorId: anchorId,
+            position: point,
+            hasRelocalized: hasRelocalized
+        )
+        places[index].anchor = anchor
+        for ruleIndex in rules.indices where rules[ruleIndex].nameKey == key {
+            rules[ruleIndex].anchor = anchor
+        }
+        return true
+    }
+
     /// "Forget everything": one action, no residue (spec 07 §Inspection).
     public mutating func wipe() {
         places = []

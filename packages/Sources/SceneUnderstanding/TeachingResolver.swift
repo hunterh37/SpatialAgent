@@ -2,17 +2,30 @@ import Foundation
 import SpatialMemory
 import simd
 
-/// The five teaching acts of spec 07 §Teaching, named as the server names them.
+/// The teaching acts of spec 07 §Teaching, named as the server names them.
 public enum TeachingAct: String, CaseIterable, Sendable {
     case namePlace = "name_place"
     case nameObject = "name_object"
     case forbidRegion = "forbid_region"
     case nameActivity = "name_activity"
     case correctName = "correct_name"
+    case setHomePerch = "set_home_perch"
 
     /// Whether the act needs somewhere to have been looked at. Correcting a name re-targets
     /// the most recent referent, so it is the one act that works with no gaze at all.
-    public var needsGaze: Bool { self != .correctName }
+    public var needsGaze: Bool { needsGaze(place: nil) }
+
+    /// Whether the act needs gaze *given what the server supplied*. Naming an existing place
+    /// as the perch is a promotion of a record that already has a position, so asking the
+    /// user to look somewhere would be asking for something already known.
+    public func needsGaze(place: String?) -> Bool {
+        switch self {
+        case .correctName: return false
+        case .setHomePerch:
+            return (place ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        default: return true
+        }
+    }
 }
 
 /// What happened, in enough detail for the bird to say it back.
@@ -48,18 +61,24 @@ public final class TeachingResolver {
         self.anchors = anchors
     }
 
-    /// Applies an act. `hard` only matters for `forbid_region`.
+    /// Applies an act. `hard` only matters for `forbid_region`; `place` only for
+    /// `set_home_perch`, where it names a place that may already exist.
     public func apply(
         _ act: TeachingAct,
         name: String,
         deviceId: String? = nil,
         hard: Bool = true,
-        allowNesting: Bool = false
+        allowNesting: Bool = false,
+        place: String? = nil
     ) async -> TeachingOutcome {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if act == .correctName {
             return correct(to: trimmed)
+        }
+
+        if act == .setHomePerch {
+            return await perch(named: place?.isEmpty == false ? place : (trimmed.isEmpty ? nil : trimmed))
         }
 
         guard let target = gaze.target() else { return .needsGaze }
@@ -134,9 +153,57 @@ public final class TeachingResolver {
             let activity = Activity(name: trimmed, placeId: placeId)
             return finish(act, name: trimmed, outcome: store.add(activity))
 
-        case .correctName:
+        case .correctName, .setHomePerch:
             return .failed("unreachable")
         }
+    }
+
+    // MARK: - Perch
+
+    /// "this is your perch". Either promotes a place the user already named or writes a new
+    /// one where they are looking; either way the map is left with exactly one perch, because
+    /// the idle-return policy resolves against `homePerch` and a second one is an ambiguous
+    /// home rather than a richer map.
+    private func perch(named requested: String?) async -> TeachingOutcome {
+        let wanted = (requested ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !wanted.isEmpty, let existing = store.map.place(named: wanted) {
+            store.setHomePerch(id: existing.id)
+            gaze.endAct()
+            mostRecentReferent = existing.id
+            store.record(
+                Episode(
+                    placeId: existing.id,
+                    kind: .taught,
+                    summary: "\(TeachingAct.setHomePerch.rawValue): \(existing.name)"
+                )
+            )
+            return .corrected(.setHomePerch, name: existing.name, id: existing.id)
+        }
+
+        guard let target = gaze.target() else { return .needsGaze }
+        let anchorId = await anchors?.anchor(at: target.point)
+        let relocalized = anchors?.hasRelocalized(anchorId) ?? true
+        // The demo preset uses this name, so an untitled perch answers to the same phrase
+        // the recall prompts already ask about.
+        let label = wanted.isEmpty ? "your perch" : wanted
+        let outcome = store.add(
+            Place(
+                name: label,
+                position: target.point,
+                radius: target.radius,
+                kind: .perch,
+                anchorId: anchorId,
+                hasRelocalized: relocalized
+            )
+        )
+        switch outcome {
+        case let .created(id), let .corrected(id):
+            // Runs even for a fresh place: the demotion of whatever was the perch before is
+            // the half of "set" that `upsert` cannot know about.
+            store.setHomePerch(id: id)
+        }
+        return finish(.setHomePerch, name: label, outcome: outcome)
     }
 
     /// Resolves a disambiguation the user answered with "nest it inside".

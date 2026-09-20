@@ -66,6 +66,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.medvr.SpatialAgent
+        DEVELOPMENT_TEAM: NWR2UZ4V67
+        CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "7"
         ENABLE_PREVIEWS: YES
@@ -80,6 +82,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.medvr.SpatialAgentUITests
+        DEVELOPMENT_TEAM: NWR2UZ4V67
+        CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "7"
         GENERATE_INFOPLIST_FILE: YES

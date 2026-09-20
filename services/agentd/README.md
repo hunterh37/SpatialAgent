@@ -106,7 +106,10 @@ agentd/executors.py     who fulfils a tool call: the client, or this machine
 agentd/ambient.py       home state -> classified, rate-limited ambient events
 agentd/discovery.py     Bonjour advertisement of _spatialagent._tcp
 agentd/directives.py    model text -> symbolic character intent
-agentd/prompt.py        runtime system prompt from scene + devices
+agentd/prompt.py        runtime system prompt from scene + devices + profile
+agentd/profile.py       durable user profile: one editable, portable JSON file
+agentd/curiosity.py     the question engine that fills the profile, and its pacing
+agentd/memory_tools.py  remember / recall / forget / update / ask, as tools
 agentd/tools/           tool registry, safety classification
 agentd/adapters/        echo (deterministic), ollama, openai-compatible
 mocks/                  fake headset, scenario fixtures, mock smart home
@@ -125,6 +128,27 @@ mocks/                  fake headset, scenario fixtures, mock smart home
 | `AGENTD_TOOL_TIMEOUT` | `30` | seconds to wait for a client-executed result |
 | `AGENTD_CONFIRM_TIMEOUT` | `120` | seconds to wait for a human; longer on purpose |
 | `AGENTD_TEMPERATURE` | `0.2` | this model is a controller, not a writer |
+| `AGENTD_PROFILE` | `~/.spatialagent/profile.json` | where the user profile is written |
+
+## Inspecting memory
+
+The profile is the user's, so it is reachable without going through the model:
+
+```
+GET    /memory            everything, newest first; ?q=coffee to search
+POST   /memory            {"text": "...", "slot": "diet"}
+PATCH  /memory/{id}       correct a fact, keeping its id
+DELETE /memory/{id}       forget one thing
+DELETE /memory            forget everything
+GET    /memory/export     the whole profile, portable
+POST   /memory/import     merge one back in; ?replace=true to overwrite
+```
+
+`slot` is one of identity, routine, preference, diet, people, place_meaning, project,
+boundary, misc. It decides how the fact is grouped in the system prompt and lets the question
+engine tell "asked and answered" from "never asked".
+
+Seed or clear the demo history with `python -m mocks.seed_demo [--wipe|--show]`.
 
 ## Phase boundaries
 

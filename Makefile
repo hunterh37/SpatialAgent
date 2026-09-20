@@ -3,7 +3,7 @@
 VENV := services/agentd/.venv
 PY   := $(VENV)/bin/python
 
-.PHONY: help protocol test test-python test-swift lint serve headset clean app home-app
+.PHONY: help protocol test test-python test-swift lint serve headset demo demo-script memory clean app home-app
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/'
@@ -48,6 +48,17 @@ serve: $(VENV) ## Local model on this machine, advertised over Bonjour
 
 headset: $(VENV) ## Drive the agent from a terminal, no Vision Pro required
 	cd services/agentd && .venv/bin/python -m mocks.fake_headset --scenario apartment
+
+demo: $(VENV) ## The memory demo, headless: landmarks placed, profile seeded (see DEMO.md)
+	cd services/agentd && .venv/bin/python -m mocks.seed_demo
+	cd services/agentd && .venv/bin/python -m mocks.fake_headset --scenario demo_loft
+
+demo-script: $(VENV) ## The same demo, scripted end to end and unattended
+	cd services/agentd && .venv/bin/python -m mocks.seed_demo
+	cd services/agentd && .venv/bin/python -m mocks.fake_headset --scenario demo_loft --demo
+
+memory: $(VENV) ## Print what the agent remembers about the user
+	cd services/agentd && .venv/bin/python -m mocks.seed_demo --show
 
 clean:
 	rm -rf $(VENV) packages/.build

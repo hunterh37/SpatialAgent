@@ -6,6 +6,7 @@ The model learns the home and the room at runtime, not from a hardcoded string
 
 from __future__ import annotations
 
+from .curiosity import CURIOSITY_PROMPT
 from .protocol import Device, SceneSnapshot
 from .teaching import TEACHING_PROMPT
 
@@ -23,14 +24,32 @@ call ask_for_place instead of guessing.
 - If a request is ambiguous, ask one short question instead of guessing."""
 
 
-def build_system_prompt(scene: SceneSnapshot, devices: list[Device]) -> str:
+def build_system_prompt(
+    scene: SceneSnapshot, devices: list[Device], profile: str = ""
+) -> str:
     """The room, described entirely in names.
 
     Everything the model learns about the space is a name, a kind or a relationship between
     two names (spec/07-memory.md Enforcement). There is no coordinate in this prompt because
     there is no coordinate in the payload it is built from.
     """
-    parts = [_BASE, TEACHING_PROMPT]
+    parts = [_BASE, TEACHING_PROMPT, CURIOSITY_PROMPT]
+
+    # The profile goes in ahead of the room. What the model knows about the *person* changes
+    # how it reads everything after it ("the desk" means something different to someone who
+    # told you they work nights), and a 3B model weights the top of its prompt most.
+    if profile:
+        parts.append(
+            "What you already know about the user, from earlier sessions. Every line is "
+            "about them, not about you: say 'you drink oat flat whites', never 'I drink "
+            "oat flat whites'. Treat it as true, never read it back as a list unless "
+            "asked, and never claim to remember anything that is not here:\n" + profile
+        )
+    else:
+        parts.append(
+            "You have not learned anything about the user yet. Their profile is empty, so "
+            "say so plainly if they ask what you remember."
+        )
 
     navigable = scene.navigable_place_names()
     if navigable:
@@ -82,6 +101,13 @@ def build_system_prompt(scene: SceneSnapshot, devices: list[Device]) -> str:
             for a in scene.activities
         ]
         parts.append("What the user does where:\n" + "\n".join(lines))
+
+    perches = [p.name for p in scene.places if p.kind == "perch"]
+    if perches:
+        parts.append(
+            f"Your perch is the {perches[0]}. Go there when you are told to wait, when the "
+            f"user is busy, or when you have nothing to do."
+        )
 
     if scene.userPlace:
         parts.append(f"The user is in the {scene.userPlace} right now.")

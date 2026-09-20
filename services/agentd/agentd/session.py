@@ -16,8 +16,21 @@ from typing import Any
 
 from .adapters.base import ModelAdapter
 from .ambient import AmbientBus, TimerBus, appliance_completions, diff_devices
+from .curiosity import Curiosity
 from .directives import directives_for
 from .executors import ClientExecutor, Outcome, PendingCalls, ToolExecutor
+from .memory_intents import intent_for
+from .memory_tools import (
+    ASK_ABOUT,
+    FORGET,
+    MEMORY_TOOLS,
+    RECALL,
+    REMEMBER,
+    SET_PERCH,
+    UPDATE,
+)
+from .memory_tools import register as register_memory
+from .profile import ProfileStore
 from .prompt import build_system_prompt
 from .protocol import (
     AmbientEvent,
@@ -43,6 +56,7 @@ from .teaching import (
 from .teaching import register as register_teaching
 from .thinking import ThinkingFilter
 from .tools import ASK_FOR_PLACE, LOOK_AT, SET_TIMER, WALK_TO, ToolRegistry
+from .toolspeak import extract_call
 
 log = logging.getLogger("agentd.session")
 
@@ -60,12 +74,18 @@ class Session:
         tools: ToolRegistry,
         executor: ToolExecutor | None = None,
         session_id: str | None = None,
+        profile: ProfileStore | None = None,
     ) -> None:
         self.id = session_id or uuid.uuid4().hex[:12]
         self.adapter = adapter
         # Teaching is part of the tool surface of every session: a session whose registry
         # was built before teaching existed would silently drop the acts.
-        self.tools = register_teaching(tools)
+        self.tools = register_memory(register_teaching(tools))
+        # The profile outlives the session and the process. It is shared rather than owned:
+        # two sessions on one machine are the same person, and a memory that only one of
+        # them could see would be a memory the user cannot trust.
+        self.profile = profile if profile is not None else ProfileStore()
+        self.curiosity = Curiosity(self.profile)
         self.executor: ToolExecutor = executor or ClientExecutor()
         self.scene = SceneSnapshot()
         # A server-owned home is known before any client connects.
@@ -178,8 +198,39 @@ class Session:
 
         # Unprompted speech yields to the user for 30s (spec/07-memory.md Curiosity).
         self.ambient.note_utterance()
+
+        # If the bird asked something and this is the reply, bank it here rather than hoping
+        # the model calls remember_about_user. A 3B model drops that call often enough that
+        # the answer would be lost, and an agent that asks a question and forgets the answer
+        # is worse than one that never asked.
+        banked = self._bank_answer(text)
+        if banked:
+            self.history.append(
+                {"role": "system", "content": f"[memory] stored: {banked}"}
+            )
+
         self.history.append({"role": "user", "content": text})
         self._trim()
+
+        # An utterance that can only be a memory operation is executed before the model is
+        # asked anything, so whether the memory changed does not depend on the model
+        # choosing to call a tool (agentd/memory_intents.py). The model still speaks the
+        # reply, from the tool result now sitting in its history.
+        intent = intent_for(text)
+        if intent is not None and not banked:
+            self._memory_tool(*intent)
+
+            # "Ask me something" is answered by the question engine, not by the model. A 1.7B
+            # model handed a question in a tool result will sometimes paraphrase it into
+            # something it already knows the answer to, which wastes the one question the
+            # pacing rules allow.
+            if intent[0] == ASK_ABOUT and self.curiosity.open_question is not None:
+                question = self.curiosity.open_question.text
+                self.history.append({"role": "assistant", "content": question})
+                yield Token(utteranceId=utterance_id, text=question)
+                yield UtteranceEnd(utteranceId=utterance_id)
+                yield Directive(directive=CharacterDirective(kind="lookAt", target="user"))
+                return
 
         emitted_places: set[str] = set()
 
@@ -214,6 +265,18 @@ class Session:
                 yield Token(utteranceId=utterance_id, text=tail)
 
             reply = "".join(buffer).strip()
+
+            # A small model that typed the call instead of making it. Only rescued when it
+            # made no real call this round, so a model doing the right thing is never
+            # second-guessed (agentd/toolspeak.py).
+            if not calls and reply:
+                typed = extract_call(reply, self.tools.names())
+                if typed is not None:
+                    name, args = typed
+                    log.info("rescued typed tool call %s", name)
+                    calls.append((uuid.uuid4().hex[:12], name, args))
+                    reply = ""
+
             if reply:
                 self.history.append({"role": "assistant", "content": reply})
 
@@ -266,6 +329,26 @@ class Session:
                     "name": SET_TIMER,
                     "content": _compact({"timer": label, "seconds": seconds, "source": source}),
                 }
+            )
+            return
+
+        if name in MEMORY_TOOLS and name != SET_PERCH:
+            self._memory_tool(name, args)
+            return
+
+        if name == SET_PERCH:
+            # A perch is a *place with a kind*, so it is taught the same way every other
+            # place is: the client resolves what the user is looking at and writes the
+            # record. The server only says that the kind is `perch`.
+            self._pending_names[call_id] = name
+            payload: dict[str, Any] = {"kind": "perch"}
+            place = str(args.get("place") or "").strip()
+            known = self._known_place(place) if place else None
+            if known:
+                payload["place"] = known
+            yield Directive(directive=CharacterDirective(kind="lookAt", target="place"))
+            yield ToolCall(
+                callId=call_id, name=name, args=payload, safety="safe", executedBy="client"
             )
             return
 
@@ -419,9 +502,81 @@ class Session:
 
     # --- internals ---------------------------------------------------------
 
+    def _bank_answer(self, text: str) -> str | None:
+        """The user's reply to an open curiosity question, stored verbatim.
+
+        A reply that is plainly a refusal is not a fact about the person, and writing "no"
+        into their profile as an identity claim is the kind of memory bug that makes a
+        memory system untrustworthy."""
+        if self.curiosity.open_question is None:
+            return None
+        stripped = text.strip().rstrip(".!?").lower()
+        if stripped in {"no", "nope", "skip", "later", "not now", "pass", "none"}:
+            self.curiosity.drop()
+            return None
+        fact_id = self.curiosity.answer(text)
+        return text.strip() if fact_id else None
+
+    def _memory_tool(self, name: str, args: dict[str, Any]) -> None:
+        """Profile reads and writes. Server-executed, because the profile lives here."""
+        result: dict[str, Any]
+        if name == REMEMBER:
+            text = str(args.get("text") or "").strip()
+            if not text:
+                result = {"error": "nothing to remember"}
+            else:
+                fact = self.profile.remember(
+                    text=text,
+                    slot=str(args.get("slot") or "misc"),
+                    place=(str(args["place"]) if args.get("place") else None),
+                )
+                result = {"stored": fact.text, "fact_id": fact.id, "slot": fact.slot}
+        elif name == RECALL:
+            hits = self.profile.search(str(args.get("query") or ""))
+            result = (
+                {"facts": [{"id": f.id, "text": f.as_line(), "slot": f.slot} for f in hits]}
+                if hits
+                # An empty result is stated, because a model handed `{}` fills the silence
+                # with a plausible memory the user never gave it.
+                else {"facts": [], "note": "nothing remembered about that yet"}
+            )
+        elif name == FORGET:
+            query = str(args.get("query") or "")
+            fact = self.profile.get(query)
+            dropped = [self.profile.forget(query)] if fact else self.profile.forget_matching(query)
+            result = {"forgot": [f.text for f in dropped if f]} if dropped else {
+                "forgot": [],
+                "note": "nothing matched; say it back to the user rather than claiming it is gone",
+            }
+        elif name == UPDATE:
+            fact = self.profile.update(
+                str(args.get("fact_id") or ""), text=str(args.get("text") or "").strip() or None
+            )
+            result = {"updated": fact.text, "fact_id": fact.id} if fact else {
+                "error": "no fact with that id; call recall_about_user first"
+            }
+        elif name == ASK_ABOUT:
+            question = self.curiosity.next_question(self.scene, force=True)
+            result = (
+                {"ask": question.text, "about": question.slot}
+                if question
+                else {"note": "no new question right now; do not invent one"}
+            )
+        else:  # pragma: no cover - MEMORY_TOOLS is exhaustive
+            result = {"error": f"unhandled memory tool {name}"}
+
+        log.info("memory %s %s -> %s", name, args, result)
+        self.history.append({"role": "tool", "name": name, "content": _compact(result)})
+        self._trim()
+
     def _messages(self) -> list[dict[str, Any]]:
         return [
-            {"role": "system", "content": build_system_prompt(self.scene, self.devices)},
+            {
+                "role": "system",
+                "content": build_system_prompt(
+                    self.scene, self.devices, self.profile.digest()
+                ),
+            },
             *self.history,
         ]
 

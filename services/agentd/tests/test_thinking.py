@@ -34,3 +34,12 @@ def test_text_around_a_block_survives() -> None:
     assert _stream(["Sure. <think>x</think>Kitchen light is off."]) == (
         "Sure. Kitchen light is off."
     )
+
+
+def test_a_bare_tool_marker_is_not_speech():
+    """qwen3 emits `<tool>` around a call it then did not make; the bird must not say it."""
+    from agentd.thinking import ThinkingFilter
+
+    stream = ThinkingFilter()
+    assert stream.feed("<tool>") == ""
+    assert stream.feed("Lights are on.") == "Lights are on."

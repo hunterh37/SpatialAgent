@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from .adapters import EchoAdapter, ModelAdapter, OllamaAdapter, OpenAICompatAdapter
 from .executors import ClientExecutor, ServerExecutor, ToolExecutor
+from .profile import ProfileStore
 from .protocol import (
     PROTOCOL_VERSION,
     ConfirmationResult,
@@ -97,7 +98,11 @@ def create_app(
     executor = executor or build_executor()
     tools = default_registry()
     store = SessionStore()
+    # One profile per machine, shared by every session. "Editable, portable, inspectable"
+    # only means anything if there is one place to edit, export and inspect.
+    profile = ProfileStore()
     app.state.sessions = store
+    app.state.profile = profile
 
     @app.get("/health")
     async def health() -> dict[str, object]:
@@ -107,7 +112,56 @@ def create_app(
             "protocolVersion": PROTOCOL_VERSION,
             "toolExecution": executor.location,
             "sessions": len(store),
+            "facts": len(profile),
+            "profilePath": str(profile.path),
         }
+
+    # --- memory as a resource the user owns -------------------------------
+    # The profile is reachable over plain HTTP, not only through the model, because a memory
+    # you can only change by asking an agent nicely is not a memory you own. curl is a
+    # first-class client here (README: Inspecting memory).
+
+    @app.get("/memory")
+    async def list_memory(q: str | None = None) -> dict[str, object]:
+        facts = profile.search(q) if q else sorted(
+            profile.facts, key=lambda f: f.updated_at, reverse=True
+        )
+        return {"count": len(profile), "facts": [f.to_dict() for f in facts]}
+
+    @app.post("/memory")
+    async def add_memory(body: dict) -> dict[str, object]:
+        try:
+            fact = profile.remember(
+                text=str(body.get("text", "")),
+                slot=str(body.get("slot") or "misc"),
+                source=str(body.get("source") or "user"),
+                place=body.get("place"),
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "fact": fact.to_dict()}
+
+    @app.patch("/memory/{fact_id}")
+    async def edit_memory(fact_id: str, body: dict) -> dict[str, object]:
+        fact = profile.update(fact_id, **body)
+        return {"ok": fact is not None, "fact": fact.to_dict() if fact else None}
+
+    @app.delete("/memory/{fact_id}")
+    async def delete_memory(fact_id: str) -> dict[str, object]:
+        fact = profile.forget(fact_id)
+        return {"ok": fact is not None, "forgot": fact.text if fact else None}
+
+    @app.delete("/memory")
+    async def wipe_memory() -> dict[str, object]:
+        return {"ok": True, "forgot": profile.wipe()}
+
+    @app.get("/memory/export")
+    async def export_memory() -> dict[str, object]:
+        return profile.export()
+
+    @app.post("/memory/import")
+    async def import_memory(body: dict, replace: bool = False) -> dict[str, object]:
+        return {"ok": True, "added": profile.import_facts(body, replace=replace)}
 
     @app.websocket("/agent")
     async def agent(ws: WebSocket) -> None:
@@ -153,7 +207,13 @@ def create_app(
 
                     resumed = store.get(message.sessionId)
                     session = resumed or store.put(
-                        Session(adapter, tools, executor, session_id=message.sessionId or None)
+                        Session(
+                            adapter,
+                            tools,
+                            executor,
+                            session_id=message.sessionId or None,
+                            profile=profile,
+                        )
                     )
                     session.touch()
                     log.info(

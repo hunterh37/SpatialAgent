@@ -8,6 +8,19 @@ stream, so it has to work on fragments that split a tag in half.
 
 from __future__ import annotations
 
+import re
+
+#: Besides `<think>`, small models emit bare structural markers — `<tool>`, `<tool_call>`,
+#: `<response>` — around a call they then failed to make. They are not speech, and the
+#: character saying "tool" out loud is the most obviously broken thing it can do. Stripped
+#: rather than held back, because unlike `<think>` there is no matching close tag to wait for.
+_STRAY_TAG = re.compile(r"</?(?:tool|tool_call|tool_response|function|response|answer)>")
+
+
+def strip_stray_tags(text: str) -> str:
+    return _STRAY_TAG.sub("", text)
+
+
 OPEN = "<think>"
 CLOSE = "</think>"
 # The longest prefix of either tag that a fragment might end on.
@@ -49,14 +62,14 @@ class ThinkingFilter:
             self._buffer = self._buffer[index + len(OPEN) :]
             self._inside = True
 
-        return "".join(out)
+        return strip_stray_tags("".join(out))
 
     def flush(self) -> str:
         """Whatever is left once the stream ends; a partial tag was never a tag."""
         rest = "" if self._inside else self._buffer
         self._buffer = ""
         self._inside = False
-        return rest
+        return strip_stray_tags(rest)
 
     def _keep_tail(self, tag: str) -> str:
         """Hold back the bytes that could still turn out to be the start of `tag`."""

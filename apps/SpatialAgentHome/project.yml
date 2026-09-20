@@ -35,3 +35,7 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.server: true
         com.apple.developer.homekit: true
+    settings:
+      base:
+        DEVELOPMENT_TEAM: NWR2UZ4V67
+        CODE_SIGN_STYLE: Automatic

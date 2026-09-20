@@ -48,8 +48,12 @@ public enum Placement {
         calendar: Calendar = .current
     ) -> Pose? {
         let perches = map.rules.filter { $0.kind == .perch }
+        // The taught home perch is a *place*, not a rule: the landmark checklist and "this
+        // is your perch" both write `PlaceKind.perch`, and launch placement has to honour
+        // that or the bird ignores the one spot the user chose for it.
+        let home = map.homePerch
         let usual = usualPlace(in: map, now: now, calendar: calendar)
-        guard !perches.isEmpty || usual != nil else {
+        guard !perches.isEmpty || home != nil || usual != nil else {
             return initialPose(in: mesh, userPosition: userPosition, userForward: userForward)
         }
         return initialPose(
@@ -59,6 +63,7 @@ public enum Placement {
         ) { candidate in
             var bonus: Float = 0
             if perches.contains(where: { $0.contains(candidate) }) { bonus += perchBonus }
+            if let home, home.isNavigable, home.contains(candidate) { bonus += perchBonus }
             if let usual, usual.contains(candidate) { bonus += usualPlaceBonus }
             return bonus
         }
