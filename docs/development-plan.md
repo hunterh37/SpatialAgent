@@ -356,6 +356,11 @@ during its band, settle and go quiet rather than follow.
 Test: `ActivityInferenceTests` asserts band formation from episodes and the follow-vs-settle
 switch.
 
+Status: done — `ActivityInference` derives bands from visited episodes (≥2 observations,
+90-minute clustering, 30-minute padding) and is recomputed from history rather than
+accumulated, so deleting episodes un-learns the habit; `response(forUserAt:in:now:)` is the
+follow-vs-settle switch.
+
 ### D3 — Curiosity
 
 New: `SpatialMemory/CuriosityPlanner.swift`. Modifies `agentd/ambient.py`.
