@@ -271,6 +271,12 @@ Done: all five acts fire against a real local model with the small-model hardeni
 Test: `test_teaching.py` drives each utterance shape through the adapter and asserts the right
 tool with the right name; `make live` covers it end to end.
 
+Status: done — `agentd/teaching.py` (five tools, `clean_name`, hard-by-default), session
+dispatch emits a look-at then a client-executed `toolCall`, prompt tells the model to call the
+tool rather than narrate. Client half is `TeachingResolver` in `SceneUnderstanding` plus gaze
+capture at utterance start in `AgentSession`, which speaks the name back and answers with a
+result carrying no location.
+
 ### C3 — Acknowledgement choreography
 
 New: `packages/Sources/CharacterKit/Bird/TeachingResponse.swift`.

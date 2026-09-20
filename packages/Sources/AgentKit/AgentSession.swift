@@ -43,6 +43,16 @@ public final class AgentSession: ObservableObject {
 
     public let confirmations = ConfirmationGate()
     public let places: MapStore
+    /// Gaze capture and the teaching acts that resolve against it. Present only once a scene
+    /// provider that can raycast is attached; teaching without a room to look at is not an
+    /// act the client can complete.
+    public private(set) var teaching: TeachingResolver?
+    public private(set) var gaze: GazeCapture?
+    /// Set when a teaching act landed inside an existing place and the user has to choose
+    /// between renaming it and nesting inside it (spec 07 §Disambiguation).
+    @Published public private(set) var teachingQuestion: TeachingQuestion?
+    /// The last name taught, for the inspector and for tests.
+    @Published public private(set) var lastTaught: String?
 
     // MARK: Collaborators
 
@@ -96,8 +106,16 @@ public final class AgentSession: ObservableObject {
         signalSink = onSignal
     }
 
+    /// Attaches gaze capture so teaching acts have somewhere to land.
+    public func attachGaze(_ caster: any GazeCasting) {
+        let capture = GazeCapture(caster: caster)
+        gaze = capture
+        teaching = TeachingResolver(store: places, gaze: capture)
+    }
+
     public func attach(scene: any SceneProviding) {
         self.scene = scene
+        if let caster = scene as? any GazeCasting { attachGaze(caster) }
         scene.onMeshChanged = { [weak self] mesh in
             self?.sendSceneUpdate(floorArea: mesh.floorArea)
         }
@@ -136,6 +154,8 @@ public final class AgentSession: ObservableObject {
         transcript.append(TranscriptEntry(role: .user, text: trimmed))
         currentReply = ""
         isStreaming = true
+        // Held from the start of the sentence, for the whole act (spec 07 §Capture).
+        captureGazeAtUtteranceStart()
 
         // React before the answer exists. The 400ms budget in PRD §6 is met here, not after
         // the model responds: the character enters `thinking` on send.
@@ -150,6 +170,7 @@ public final class AgentSession: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, capabilities.speechInput else { return }
         let id = pendingPartialId ?? { let new = UUID().uuidString; pendingPartialId = new; return new }()
+        captureGazeAtUtteranceStart()
         Task { await channel.send(.userUtterance(id: id, text: trimmed, isFinal: false)) }
     }
 
@@ -268,6 +289,100 @@ public final class AgentSession: ObservableObject {
 
     // MARK: Tools
 
+    // MARK: Teaching
+
+    /// Captures the gaze target at the moment an utterance begins (spec 07 §Capture).
+    ///
+    /// Called from both the final utterance and the first partial of a dictated one: by the
+    /// time "this is my workspace" has finished, the user is already looking somewhere else,
+    /// so the capture has to happen at the first word the client hears.
+    private func captureGazeAtUtteranceStart() {
+        guard let gaze, let scene else { return }
+        guard gaze.target() == nil else { return }
+        gaze.beginUtterance(origin: scene.userPosition, direction: scene.userForward)
+    }
+
+    /// Runs one of the five teaching acts against the held gaze target and answers the
+    /// server with what happened — never with where it happened.
+    private func runTeaching(callId: String, act: TeachingAct, args: JSONObject?) async {
+        guard let teaching else {
+            await channel.send(
+                .toolResult(callId: callId, ok: false, payload: nil, error: "no_room_yet")
+            )
+            return
+        }
+        let name = args?["name"]?.stringValue ?? ""
+        let deviceId = args?["device_id"]?.stringValue
+        let hard = args?["hard"]?.boolValue ?? true
+
+        let outcome = await teaching.apply(act, name: name, deviceId: deviceId, hard: hard)
+        await report(outcome, callId: callId, act: act)
+    }
+
+    private func report(_ outcome: TeachingOutcome, callId: String, act: TeachingAct) async {
+        switch outcome {
+        case let .taught(_, name, _):
+            // Saying the name back is the confirmation channel for a mis-transcription, so
+            // it happens here rather than being left to whatever the model says next.
+            speakInCharacter("Okay — \(name).")
+            lastTaught = name
+            await channel.send(
+                .toolResult(callId: callId, ok: true, payload: ["name": .string(name)], error: nil)
+            )
+        case let .corrected(_, name, _):
+            speakInCharacter("Got it — \(name) now.")
+            lastTaught = name
+            await channel.send(
+                .toolResult(
+                    callId: callId,
+                    ok: true,
+                    payload: ["name": .string(name), "corrected": .bool(true)],
+                    error: nil
+                )
+            )
+        case .needsGaze:
+            speakInCharacter("I didn't catch where — look at it and say that again?")
+            await channel.send(
+                .toolResult(callId: callId, ok: false, payload: nil, error: "no_gaze_target")
+            )
+        case let .needsDisambiguation(existing, name, act):
+            teachingQuestion = TeachingQuestion(
+                existingName: existing.name,
+                proposedName: name,
+                act: act,
+                callId: callId
+            )
+            speakInCharacter(
+                "That's inside \(existing.name). Rename it to \(name), or is \(name) a thing in there?"
+            )
+        case let .failed(reason):
+            await channel.send(
+                .toolResult(callId: callId, ok: false, payload: nil, error: reason)
+            )
+        }
+    }
+
+    /// The two answers a disambiguation has, and the only two (spec 07 §Disambiguation).
+    public enum TeachingAnswer: Sendable { case rename, nest }
+
+    public func answerTeaching(_ answer: TeachingAnswer) {
+        guard let question = teachingQuestion, let teaching else { return }
+        teachingQuestion = nil
+        Task {
+            let outcome: TeachingOutcome
+            switch answer {
+            case .rename:
+                guard let existing = places.map.place(named: question.existingName) else {
+                    return
+                }
+                outcome = teaching.rename(existing: existing, to: question.proposedName)
+            case .nest:
+                outcome = await teaching.nest(name: question.proposedName, act: question.act)
+            }
+            await report(outcome, callId: question.callId, act: question.act)
+        }
+    }
+
     private func runTool(
         callId: String,
         name: String,
@@ -275,6 +390,13 @@ public final class AgentSession: ObservableObject {
         serverSafety: Safety,
         executedBy: Executor
     ) async {
+        // Teaching acts are resolved against the gaze target and the map, never against the
+        // home, so they never reach the safety gate or an executor.
+        if executedBy == .client, let act = TeachingAct(rawValue: name) {
+            await runTeaching(callId: callId, act: act, args: args)
+            return
+        }
+
         // Client-enforced, independent of what the server asserted. Stricter wins.
         let safety = ToolSafety.effective(name: name, serverAsserted: serverSafety)
 
@@ -364,6 +486,15 @@ public struct AmbientNotice: Identifiable, Hashable, Sendable {
 }
 
 /// The agent asking for a place it does not have. Cleared when `places` gains that name.
+/// A disambiguation the user has to answer, with exactly two answers.
+public struct TeachingQuestion: Identifiable, Sendable {
+    public let id = UUID()
+    public let existingName: String
+    public let proposedName: String
+    public let act: TeachingAct
+    let callId: String
+}
+
 public struct PlaceRequest: Identifiable, Hashable, Sendable {
     public let id = UUID()
     public let name: String

@@ -7,6 +7,7 @@ The model learns the home and the room at runtime, not from a hardcoded string
 from __future__ import annotations
 
 from .protocol import Device, SceneSnapshot
+from .teaching import TEACHING_PROMPT
 
 _BASE = """You are SpatialAgent: a small character standing in the user's real room, \
 visible to them through an Apple Vision Pro. You control their smart home.
@@ -29,7 +30,7 @@ def build_system_prompt(scene: SceneSnapshot, devices: list[Device]) -> str:
     two names (spec/07-memory.md Enforcement). There is no coordinate in this prompt because
     there is no coordinate in the payload it is built from.
     """
-    parts = [_BASE]
+    parts = [_BASE, TEACHING_PROMPT]
 
     navigable = scene.navigable_place_names()
     if navigable:

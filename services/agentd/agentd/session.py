@@ -33,6 +33,14 @@ from .protocol import (
     ToolResult,
     UtteranceEnd,
 )
+from .teaching import (
+    FORBID_REGION,
+    NAME_OBJECT,
+    TEACHING_TOOLS,
+    clean_name,
+    hardness,
+)
+from .teaching import register as register_teaching
 from .thinking import ThinkingFilter
 from .tools import ASK_FOR_PLACE, LOOK_AT, WALK_TO, ToolRegistry
 
@@ -55,7 +63,9 @@ class Session:
     ) -> None:
         self.id = session_id or uuid.uuid4().hex[:12]
         self.adapter = adapter
-        self.tools = tools
+        # Teaching is part of the tool surface of every session: a session whose registry
+        # was built before teaching existed would silently drop the acts.
+        self.tools = register_teaching(tools)
         self.executor: ToolExecutor = executor or ClientExecutor()
         self.scene = SceneSnapshot()
         # A server-owned home is known before any client connects.
@@ -227,6 +237,11 @@ class Session:
                 yield event
             return
 
+        if name in TEACHING_TOOLS:
+            async for event in self._teach(call_id, name, args):
+                yield event
+            return
+
         safety = self.tools.safety_of(name)
         # Coerce before announcing: the client sees exactly the arguments that will run.
         args = self.tools.coerce(name, args)
@@ -301,6 +316,48 @@ class Session:
             {"role": "tool", "name": LOOK_AT, "content": _compact({"looking_at": place or "user"})}
         )
         yield Directive(directive=directive)
+
+    async def _teach(
+        self, call_id: str, name: str, args: dict[str, Any]
+    ) -> AsyncIterator[ServerEvent]:
+        """A teaching act, handed to the client to resolve against the held gaze target.
+
+        The server contributes the act and the name and nothing else. It never learns where
+        the user was looking, which is the whole reason teaching is a client-executed tool
+        rather than something the server resolves and stores (spec/07-memory.md Enforcement).
+        """
+        spoken = clean_name(args.get("name"))
+        payload: dict[str, Any] = {}
+        if spoken:
+            payload["name"] = spoken
+        if name == FORBID_REGION:
+            payload["hard"] = hardness(args)
+        elif not spoken:
+            # Every other act is a name; without one there is nothing to teach, and asking
+            # beats writing an empty record.
+            self.history.append(
+                {
+                    "role": "tool",
+                    "name": name,
+                    "content": _compact({"error": "no name was heard; ask the user to repeat"}),
+                }
+            )
+            return
+        if name == NAME_OBJECT and isinstance(args.get("device_id"), str):
+            payload["device_id"] = args["device_id"]
+
+        self._pending_names[call_id] = name
+        log.info("teach %s %s", name, payload)
+        # Look at it first: every act produces a visible reaction within 400ms, and the look
+        # is the part that does not need the record to have been written yet.
+        yield Directive(directive=CharacterDirective(kind="lookAt", target="place"))
+        yield ToolCall(
+            callId=call_id,
+            name=name,
+            args=payload,
+            safety="safe",
+            executedBy="client",
+        )
 
     def _known_place(self, name: str) -> str | None:
         lowered = name.strip().lower()
