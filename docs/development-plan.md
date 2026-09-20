@@ -341,6 +341,11 @@ nearest legal floor point, while keeping every spec 05 placement constraint.
 Test: `PlacementTests` asserts perch preference and that all hard constraints still hold when
 the preferred spot is illegal.
 
+Status: done — `Placement.initialPose(…map:now:)` biases legal candidates toward `perch`
+regions and the place whose activity band covers now; every ring is scored before choosing,
+fragile and forbidden regions are excluded from landing, and an empty map places exactly as
+before.
+
 ### D2 — Activity inference and response
 
 New: `SpatialMemory/ActivityInference.swift`.

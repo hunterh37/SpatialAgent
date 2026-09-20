@@ -83,7 +83,10 @@ struct ImmersiveView: View {
             let pose = Placement.initialPose(
                 in: mesh,
                 userPosition: model.scene.userPosition,
-                userForward: model.scene.userForward
+                userForward: model.scene.userForward,
+                // Presence follows the map: perches and the user's usual place for this
+                // hour beat the nearest legal floor point (spec/07-memory.md).
+                map: session.places.map
             )
         else {
             // No valid point: say so rather than placing it badly.

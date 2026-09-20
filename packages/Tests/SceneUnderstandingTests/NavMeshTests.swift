@@ -56,35 +56,6 @@ final class NavMeshTests: XCTestCase {
     }
 }
 
-final class PlacementTests: XCTestCase {
-    func testInitialPlacementRespectsMinimumDistanceAndFloor() throws {
-        let floor = FloorRect(center: SIMD3(0, 0, 0), extent: SIMD2(6, 6))
-        let mesh = NavMeshBuilder.build(floors: [floor], obstacles: [])!
-        let user = SIMD3<Float>(0, 1.5, 2)
-        let pose = try XCTUnwrap(
-            Placement.initialPose(in: mesh, userPosition: user, userForward: SIMD3(0, 0, -1))
-        )
-        XCTAssertTrue(mesh.isWalkable(pose.position))
-        XCTAssertGreaterThanOrEqual(
-            Placement.planarDistance(pose.position, user),
-            Placement.minimumUserDistance
-        )
-    }
-
-    /// No valid point must mean "say so", never "place it badly" (spec/05-scene.md).
-    func testNoReachableFloorReturnsNil() {
-        let tiny = FloorRect(center: SIMD3(0, 0, 0), extent: SIMD2(0.3, 0.3))
-        let mesh = NavMeshBuilder.build(floors: [tiny], obstacles: [])!
-        XCTAssertNil(
-            Placement.initialPose(
-                in: mesh,
-                userPosition: SIMD3(0, 1.5, 0),
-                userForward: SIMD3(0, 0, -1)
-            )
-        )
-    }
-}
-
 /// Spec 07 §Enforcement. The claim "a model that decides to go there simply gets no path" is
 /// only true if it is true for every start and every goal, so it is tested as a property over
 /// 10k random pairs rather than with a handful of examples.

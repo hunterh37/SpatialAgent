@@ -6,8 +6,9 @@ import SwiftUI
 import simd
 import VoiceInput
 
-/// The 2D control surface: connection, the transcript, and the text field that stands in for
-/// speech until v0.2. The character itself lives in the immersive space.
+/// Larry's control surface: connection, the transcript, and the text field that stands in for
+/// speech until v0.2. The character itself lives in the immersive space; the window is the
+/// playful shell around him (candy cards, an XP bar, a bobbing badge).
 struct ContentView: View {
     @Environment(AppModel.self) private var model
     @EnvironmentObject private var session: AgentSession
@@ -21,13 +22,19 @@ struct ContentView: View {
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 14) {
             header
-            Divider().padding(.vertical, 12)
-            transcript
+            LarryCard(tint: Larry.sky) { transcript }
             composer
         }
-        .padding(24)
+        .padding(22)
+        .background(
+            LinearGradient(
+                colors: [Larry.grape.opacity(0.22), Larry.sky.opacity(0.10)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
         .task { await model.start() }
         .task {
             // Dictation drives the same path as the text field: partials keep the server
@@ -66,17 +73,29 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center, spacing: 14) {
+            LarryAvatar(isExcited: session.isStreaming || voice.isListening)
             VStack(alignment: .leading, spacing: 4) {
-                Text("SpatialAgent").font(.title)
+                HStack(spacing: 6) {
+                    Text(Larry.name).font(.largeTitle.weight(.heavy))
+                    Text(Larry.tagline).font(.caption).foregroundStyle(Larry.mint)
+                }
                 Text(connectionLabel).font(.caption).foregroundStyle(.secondary)
                     .accessibilityIdentifier("connection.label")
+                LarryXPBar(level: level, progress: levelProgress).frame(width: 190)
             }
             Spacer()
-            Button("What I know") { showingMap = true }
-                .accessibilityIdentifier("map.open")
+            Button {
+                showingMap = true
+            } label: {
+                Label("What I know", systemImage: "backpack.fill")
+            }
+            .buttonStyle(.bordered)
+            .tint(Larry.mint)
+            .accessibilityIdentifier("map.open")
             Toggle("In the room", isOn: spaceBinding)
                 .toggleStyle(.button)
+                .tint(Larry.bubblegum)
                 .accessibilityIdentifier("space.toggle")
         }
         .overlay(alignment: .bottomLeading) {
@@ -113,10 +132,20 @@ struct ContentView: View {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(session.transcript) { entry in
                         HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: entry.role == .user ? "person" : "sparkle")
-                                .foregroundStyle(.secondary)
-                                .frame(width: 18)
+                            if entry.role == .user {
+                                Image(systemName: "person.fill")
+                                    .foregroundStyle(Larry.sky)
+                                    .frame(width: 22)
+                            } else {
+                                LarryAvatar(size: 22)
+                            }
                             Text(entry.text)
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 12)
+                                .background(
+                                    (entry.role == .user ? Larry.sky : Larry.bubblegum).opacity(0.18),
+                                    in: .rect(cornerRadius: 18)
+                                )
                         }
                         .id(entry.id)
                         .accessibilityIdentifier(
@@ -139,18 +168,28 @@ struct ContentView: View {
     private var composer: some View {
         HStack(spacing: 10) {
             micButton
-            TextField("Ask it to do something", text: $draft, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
+            TextField("Tell Larry to do something", text: $draft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.white.opacity(0.12), in: .capsule)
                 .focused($fieldFocused)
                 .onSubmit(send)
                 .accessibilityIdentifier("composer.field")
             Button("Send", action: send)
                 .buttonStyle(.borderedProminent)
+                .tint(Larry.bubblegum)
                 .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
                 .accessibilityIdentifier("composer.send")
         }
-        .padding(.top, 14)
+        .padding(10)
+        .background(Larry.grape.opacity(0.14), in: .capsule)
     }
+
+    /// Cosmetic only: Larry "levels up" every five exchanges so the window has a reason to
+    /// celebrate. Nothing in the agent path reads these numbers.
+    private var level: Int { session.transcript.count / 5 + 1 }
+    private var levelProgress: Double { Double(session.transcript.count % 5) / 5.0 }
 
     /// Push-to-talk. Held state is explicit rather than voice-activated: an always-open mic
     /// in a room with other people is a different product.
@@ -162,7 +201,7 @@ struct ContentView: View {
                 .symbolEffect(.variableColor, isActive: voice.isListening)
         }
         .buttonStyle(.bordered)
-        .tint(voice.isListening ? .red : nil)
+        .tint(voice.isListening ? Larry.bubblegum : Larry.mint)
         .help(voiceProblem ?? "Dictate")
     }
 
