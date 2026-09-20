@@ -25,6 +25,8 @@ final class AppModel {
 
     let discovery = AgentDiscovery()
     let session: AgentSession
+    /// Seeds the demo room and replays chip scripts when no Mac is attached.
+    let demo: DemoDirector
     let home: RemoteHomeProvider
     let scene: any SceneProviding
 
@@ -32,6 +34,7 @@ final class AppModel {
         let home = RemoteHomeProvider()
         self.home = home
         session = AgentSession(home: home)
+        demo = DemoDirector(session: session)
         #if targetEnvironment(simulator)
         // The simulator has no plane detection; the fixture room keeps the loop runnable
         // there and mirrors mocks/scenarios/apartment.yaml.

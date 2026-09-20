@@ -56,6 +56,59 @@ public enum PlaceKind: String, Codable, CaseIterable, Sendable {
     case surface
     case floor
     case perch
+    /// Where the bird is fed. The need `.hungry` resolves against this kind, never a name.
+    case food
+    /// Where it drinks.
+    case water
+    /// Where the user pets it: the one place a `.lonely` need can be satisfied.
+    case comfort
+    /// Where its toys live.
+    case toy
+
+    /// The kinds that answer a need rather than a name. Exactly one place each, which is
+    /// what makes "go eat" resolvable with no landmark named in the utterance.
+    public var need: Need? {
+        switch self {
+        case .food: return .hungry
+        case .water: return .thirsty
+        case .comfort: return .lonely
+        case .toy: return .bored
+        case .perch: return .sleepy
+        default: return nil
+        }
+    }
+}
+
+/// What the bird is trying to satisfy. A need is the demo's whole point: the utterance says
+/// "I'm hungry" and the destination comes out of the map, so deleting the bowl changes the
+/// answer instead of changing the script.
+public enum Need: String, Codable, CaseIterable, Sendable {
+    case hungry
+    case thirsty
+    case lonely
+    case bored
+    case sleepy
+
+    public var kind: PlaceKind {
+        switch self {
+        case .hungry: return .food
+        case .thirsty: return .water
+        case .lonely: return .comfort
+        case .bored: return .toy
+        case .sleepy: return .perch
+        }
+    }
+
+    /// Said out loud before the flight, so the audience hears the lookup.
+    public var verb: String {
+        switch self {
+        case .hungry: return "eat"
+        case .thirsty: return "drink"
+        case .lonely: return "get pets"
+        case .bored: return "find a toy"
+        case .sleepy: return "settle"
+        }
+    }
 }
 
 /// "my workspace" — a named region (spec 07 §Model).

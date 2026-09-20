@@ -1,13 +1,25 @@
 import Foundation
 import simd
 
-/// The ordered set of landmarks a room is set up with before a demo.
-///
-/// Teaching by speech is the product; this is the pre-flight for it. A preset exists because
-/// the demo needs the *same* room every time — a perch, a workspace, a fragile plant — and
-/// re-deriving those names from whatever was said on stage is how a demo loses its story.
-/// The names here are the names the recall prompts in `DemoScenarios` ask about, so the two
-/// lists are one contract.
+// The ordered set of landmarks a room is set up with before a demo. Teaching by speech is
+// the product; this is the pre-flight for it. The demo needs the same room every time, and
+// every preset here carries the `PlaceKind` a need resolves against, so the recall prompts
+// in `DemoScenarios` and this list are one contract.
+
+/// What gets drawn where a landmark is. The marker is built from primitives at runtime, so
+/// this is a shape recipe rather than an asset name: a bowl is a cylinder and a rim, a perch
+/// is a pole and a crossbar (spec 06 — no assets anywhere in the app).
+public enum PropStyle: String, Codable, CaseIterable, Sendable {
+    case perch
+    case foodBowl
+    case waterDish
+    case cushion
+    case toyBasket
+    case desk
+    case plant
+    case marker
+}
+
 public struct LandmarkPreset: Identifiable, Hashable, Sendable {
     public var id: String
     /// Checklist row title.
@@ -21,6 +33,8 @@ public struct LandmarkPreset: Identifiable, Hashable, Sendable {
     /// What the user is told to look at before tapping.
     public var prompt: String
     public var radius: Float
+    /// The low-poly prop drawn at the landmark.
+    public var prop: PropStyle
     /// Where the synthetic fallback puts it, as (right, forward) metres from the user.
     ///
     /// The simulator has no plane detection and no gaze raycast, so without this the whole
@@ -35,6 +49,7 @@ public struct LandmarkPreset: Identifiable, Hashable, Sendable {
         rule: Rule.Kind? = nil,
         prompt: String,
         radius: Float = 0.5,
+        prop: PropStyle = .marker,
         fallbackOffset: SIMD2<Float>
     ) {
         self.id = id
@@ -44,59 +59,80 @@ public struct LandmarkPreset: Identifiable, Hashable, Sendable {
         self.rule = rule
         self.prompt = prompt
         self.radius = max(0.1, radius)
+        self.prop = prop
         self.fallbackOffset = fallbackOffset
     }
 
     /// True when this preset claims the one home perch.
     public var isHomePerch: Bool { kind == .perch }
 
-    /// The seven-landmark room. Ordered: the perch first, because everything the bird does
-    /// when nobody is talking to it resolves against that one record.
+    /// The need this landmark answers, if any. `nil` for scenery and for the plant.
+    public var need: Need? { kind.need }
+
+    /// The demo room, which is a bird's room rather than a furniture catalogue: everything
+    /// in it either answers a need (perch, bowl, dish, cushion, basket) or constrains the
+    /// route (the plant). Ordered so the checklist teaches the story in order — where it
+    /// sleeps, then eats, drinks, gets petted, plays, and finally what to stay off.
     public static let demoRoom: [LandmarkPreset] = [
         LandmarkPreset(
             id: "perch",
-            label: "Home perch",
+            label: "Perch",
             name: "your perch",
             kind: .perch,
             prompt: "Look at the shelf or ledge the bird should live on.",
             radius: 0.35,
+            prop: .perch,
             fallbackOffset: SIMD2(-1.0, -1.4)
         ),
         LandmarkPreset(
+            id: "food-bowl",
+            label: "Food bowl",
+            name: "the food bowl",
+            kind: .food,
+            prompt: "Look at the spot where you feed him.",
+            radius: 0.35,
+            prop: .foodBowl,
+            fallbackOffset: SIMD2(1.2, -1.5)
+        ),
+        LandmarkPreset(
+            id: "water-dish",
+            label: "Water dish",
+            name: "the water dish",
+            kind: .water,
+            prompt: "Look at the spot where his water sits.",
+            radius: 0.3,
+            prop: .waterDish,
+            fallbackOffset: SIMD2(1.7, -1.1)
+        ),
+        LandmarkPreset(
+            id: "petting-spot",
+            label: "Petting spot",
+            name: "the petting spot",
+            kind: .comfort,
+            prompt: "Look at where you sit when you pet him.",
+            radius: 0.6,
+            prop: .cushion,
+            fallbackOffset: SIMD2(-1.7, -0.7)
+        ),
+        LandmarkPreset(
+            id: "toy-basket",
+            label: "Toy basket",
+            name: "the toy basket",
+            kind: .toy,
+            prompt: "Look at where his toys are kept.",
+            radius: 0.4,
+            prop: .toyBasket,
+            fallbackOffset: SIMD2(-0.2, -2.2)
+        ),
+        LandmarkPreset(
             id: "workspace",
-            label: "Workspace",
+            label: "Your desk",
             name: "my desk",
             kind: .workspace,
             prompt: "Look at your desk.",
             radius: 0.8,
-            fallbackOffset: SIMD2(1.2, -0.6)
-        ),
-        LandmarkPreset(
-            id: "couch",
-            label: "Couch",
-            name: "the couch",
-            kind: .surface,
-            prompt: "Look at the couch.",
-            radius: 0.9,
-            fallbackOffset: SIMD2(-1.6, -1.2)
-        ),
-        LandmarkPreset(
-            id: "front-door",
-            label: "Front door",
-            name: "the front door",
-            kind: .floor,
-            prompt: "Look at the floor in front of the door.",
-            radius: 1.0,
-            fallbackOffset: SIMD2(0, 1.8)
-        ),
-        LandmarkPreset(
-            id: "kitchen",
-            label: "Kitchen",
-            name: "the kitchen",
-            kind: .floor,
-            prompt: "Look at the middle of the kitchen floor.",
-            radius: 1.2,
-            fallbackOffset: SIMD2(1.8, 1.0)
+            prop: .desk,
+            fallbackOffset: SIMD2(1.0, -0.4)
         ),
         LandmarkPreset(
             id: "plant",
@@ -107,18 +143,16 @@ public struct LandmarkPreset: Identifiable, Hashable, Sendable {
             rule: .fragile,
             prompt: "Look at the plant.",
             radius: 0.4,
-            fallbackOffset: SIMD2(-0.4, -1.9)
-        ),
-        LandmarkPreset(
-            id: "snack-shelf",
-            label: "Snack shelf",
-            name: "the snack shelf",
-            kind: .surface,
-            prompt: "Look at the snack shelf.",
-            radius: 0.5,
-            fallbackOffset: SIMD2(2.0, -1.2)
+            prop: .plant,
+            fallbackOffset: SIMD2(0.3, -1.8)
         ),
     ]
+
+    /// The preset that answers a need, which is how a scripted beat targets "wherever he
+    /// eats" without naming the bowl.
+    public static func preset(for need: Need) -> LandmarkPreset? {
+        demoRoom.first { $0.kind == need.kind }
+    }
 
     public static func preset(id: String) -> LandmarkPreset? {
         demoRoom.first { $0.id == id }

@@ -63,7 +63,7 @@ struct LandmarkSetupView: View {
                     .foregroundStyle(.secondary)
                 // The spheres are the correction path: nothing else in the app says a
                 // placed landmark can still be moved by hand.
-                Text("Placed landmarks show as blue spheres — pinch one to drag it.")
+                Text("Placed landmarks show as props in the room — pinch one to drag it.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

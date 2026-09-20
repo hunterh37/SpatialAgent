@@ -48,10 +48,10 @@ final class LandmarkPlacerTests: XCTestCase {
     /// The simulator has no raycast, and the flow still has to be demoable there.
     func testPlacingWithoutGazeFallsBackToASyntheticOffset() async {
         let (placer, store) = makePlacer(gaze: false)
-        let outcome = await placer.place(preset("couch"))
+        let outcome = await placer.place(preset("petting-spot"))
 
-        XCTAssertEqual(outcome, .placedSynthetically(name: "the couch"))
-        XCTAssertNotNil(store.map.place(named: "the couch"))
+        XCTAssertEqual(outcome, .placedSynthetically(name: "the petting spot"))
+        XCTAssertNotNil(store.map.place(named: "the petting spot"))
     }
 
     func testTheHomePerchMovesRatherThanMultiplying() async {
@@ -70,9 +70,9 @@ final class LandmarkPlacerTests: XCTestCase {
 
     func testRePlacingCorrectsInPlace() async {
         let (placer, store) = makePlacer(gaze: true)
-        await placer.place(preset("kitchen"))
-        await placer.place(preset("kitchen"))
-        XCTAssertEqual(store.map.places.filter { $0.nameKey == "the kitchen" }.count, 1)
+        await placer.place(preset("toy-basket"))
+        await placer.place(preset("toy-basket"))
+        XCTAssertEqual(store.map.places.filter { $0.nameKey == "the toy basket" }.count, 1)
     }
 
     /// Deleting the plant has to take its keep-away region with it.
@@ -90,7 +90,7 @@ final class LandmarkPlacerTests: XCTestCase {
         let (placer, _) = makePlacer(gaze: true)
         XCTAssertEqual(placer.next()?.id, "perch")
         await placer.place(preset("perch"))
-        XCTAssertEqual(placer.next()?.id, "workspace")
+        XCTAssertEqual(placer.next()?.id, "food-bowl")
     }
 
     func testResetRoomForgetsEverything() async {
@@ -127,7 +127,7 @@ final class LandmarkPlacerTests: XCTestCase {
 
     func testMovingAnUnplacedLandmarkFails() async {
         let (placer, _) = makePlacer(gaze: true)
-        let outcome = await placer.move(preset("kitchen"), to: .zero)
+        let outcome = await placer.move(preset("toy-basket"), to: .zero)
         guard case .failed = outcome else { return XCTFail("expected .failed, got \(outcome)") }
     }
 }

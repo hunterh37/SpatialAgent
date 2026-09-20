@@ -21,7 +21,7 @@ struct ImmersiveView: View {
     /// Hand tracking runs its own ARKit session; the scene provider's session owns world and
     /// plane data and has a different lifetime (it survives leaving the immersive space).
     @State private var hands = HandTrackingSession()
-    /// The grabbable blue landmark spheres, and which one a pinch currently owns.
+    /// The grabbable low-poly landmark props, and which one a pinch currently owns.
     @State private var markers = LandmarkMarkers()
     @State private var dragging: String?
     @State private var dragStart: SIMD3<Float>?
@@ -105,6 +105,15 @@ struct ImmersiveView: View {
                 }
             }
         }
+        // The ARKit hand-tracking session has to be run before `latestAnchors` returns
+        // anything; without this `update` short-circuits on `isRunning` every frame and no
+        // palm is ever detected.
+        .task {
+            await hands.start()
+        }
+        .onDisappear {
+            hands.stop()
+        }
         .gesture(
             // Tapping the character is the v0.1 stand-in for gaze addressing.
             SpatialTapGesture().targetedToAnyEntity().onEnded { value in
@@ -112,7 +121,7 @@ struct ImmersiveView: View {
                 session.addressed()
             }
         )
-        // Grab a landmark sphere and move it. The map is written once, on release: a drag
+        // Grab a landmark prop and move it. The map is written once, on release: a drag
         // is one correction, not sixty anchor writes.
         .gesture(
             DragGesture()

@@ -205,31 +205,104 @@ struct ContentView: View {
         .background(Larry.grape.opacity(0.14), in: .capsule)
     }
 
-    /// Canned utterances, sent verbatim through the same path the text field uses. The
-    /// strings live in `DemoScenarios` so the demo script is data rather than view code.
+    /// Canned utterances. Connected, a chip sends the string a person would have typed;
+    /// offline, the director replays that beat's directives so the bird still flies. The
+    /// strings and the beats live in `DemoScenarios` so the demo script is data, not view
+    /// code.
     private var demoChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 18) {
-                ForEach(DemoScenarios.all) { group in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label(group.title, systemImage: group.symbol)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Larry.mint)
-                        HStack(spacing: 6) {
-                            ForEach(group.prompts) { prompt in
-                                Button(prompt.label) { session.send(utterance: prompt.utterance) }
-                                    .buttonStyle(.bordered)
-                                    .tint(Larry.grape)
-                                    .font(.caption)
-                                    .accessibilityIdentifier("demo.chip")
+        VStack(alignment: .leading, spacing: 8) {
+            demoBar
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 18) {
+                    ForEach(DemoScenarios.all) { group in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(group.title, systemImage: group.symbol)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Larry.mint)
+                            HStack(spacing: 6) {
+                                ForEach(group.prompts) { prompt in
+                                    chip(prompt)
+                                }
                             }
                         }
                     }
                 }
+                .padding(.horizontal, 2)
             }
-            .padding(.horizontal, 2)
         }
-        .frame(maxHeight: 76)
+        .frame(maxHeight: 132)
+    }
+
+    private func chip(_ prompt: DemoPrompt) -> some View {
+        Button {
+            model.demo.tap(prompt)
+        } label: {
+            HStack(spacing: 4) {
+                if prompt.movesTheBird {
+                    Image(systemName: "bird.fill").font(.system(size: 9))
+                }
+                Text(prompt.label)
+            }
+        }
+        .buttonStyle(.bordered)
+        .tint(model.demo.playing == prompt ? Larry.bubblegum : Larry.grape)
+        .font(.caption)
+        .accessibilityIdentifier("demo.chip")
+    }
+
+    /// Room setup and the run-of-show, next to the chips that depend on them: the five beats
+    /// only read as memory if the landmarks exist before the first tap.
+    private var demoBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                Task { await model.demo.seedRoom() }
+            } label: {
+                Label(roomLabel, systemImage: "shippingbox.fill").font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .tint(model.demo.room.isReady ? Larry.mint : Larry.sky)
+            .disabled(model.demo.room == .seeding)
+            .accessibilityIdentifier("demo.seed")
+
+            Button {
+                model.demo.runOfShow()
+            } label: {
+                Label("Run of show", systemImage: "play.fill").font(.caption)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Larry.bubblegum)
+            .accessibilityIdentifier("demo.runofshow")
+
+            if model.demo.isPlaying {
+                Button("Stop") { model.demo.stop() }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
+                    .accessibilityIdentifier("demo.stop")
+            }
+
+            Button {
+                Task { await model.demo.resetRoom() }
+            } label: {
+                Label("Reset room", systemImage: "trash").font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .tint(Larry.grape)
+            .accessibilityIdentifier("demo.reset")
+
+            if let problem = model.demo.problem {
+                Text(problem).font(.caption2).foregroundStyle(.orange).lineLimit(1)
+            }
+            Spacer()
+        }
+    }
+
+    private var roomLabel: String {
+        switch model.demo.room {
+        case .empty: return "Set up demo room"
+        case .seeding: return "Placing…"
+        case let .ready(placed, synthetic):
+            return synthetic ? "Room ready · \(placed) (synthetic)" : "Room ready · \(placed)"
+        }
     }
 
     /// Cosmetic only: Larry "levels up" every five exchanges so the window has a reason to

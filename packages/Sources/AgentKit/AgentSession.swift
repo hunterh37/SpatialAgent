@@ -199,6 +199,60 @@ public final class AgentSession: ObservableObject {
         Task { await channel.send(.userUtterance(id: id, text: trimmed, isFinal: false)) }
     }
 
+    // MARK: Scripted demo input
+
+    /// True when no server is answering. The demo director uses it to decide whether a chip
+    /// is an utterance or a replay; nothing else should branch on it.
+    public var isOffline: Bool {
+        if case .connected = connection { return false }
+        return true
+    }
+
+    /// Appends a user line without sending it anywhere. Only the demo director calls this,
+    /// and only when there is no server to send to.
+    public func appendUserLocally(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        transcript.append(TranscriptEntry(role: .user, text: trimmed))
+        signal(.utteranceEnded)
+    }
+
+    /// Speaks a scripted line through the same path a server-sent line takes.
+    public func speakLocally(_ line: String) { speakInCharacter(line) }
+
+    /// Runs a home tool with no model in the loop, for a scripted beat. The safety gate is
+    /// deliberately still ahead of it for unsafe tools: a demo that skips the confirmation
+    /// prompt is demoing a different product.
+    @discardableResult
+    public func executeLocally(tool: String, args: JSONObject?) async -> Bool {
+        if ToolSafety.effective(name: tool, serverAsserted: .safe) == .unsafe {
+            let device = home.devices.first { $0.id == args?["device_id"]?.stringValue }
+            let outcome = await confirmations.request(
+                callId: UUID().uuidString,
+                toolName: tool,
+                deviceName: device?.name ?? "device",
+                summary: ConfirmationGate.summarize(tool: tool, args: args, device: device)
+            )
+            guard outcome == .confirmed else {
+                speakInCharacter("Okay — leaving that alone.")
+                return false
+            }
+        }
+        do {
+            _ = try await home.execute(tool: tool, args: args)
+            publishDevices()
+            return true
+        } catch {
+            speakInCharacter((error as? HomeError)?.spokenLine ?? "That didn't work.")
+            return false
+        }
+    }
+
+    /// Replays a directive through the resolver, identically to `characterDirective`.
+    /// The body cannot tell the difference, which is the point: a rehearsed beat and a live
+    /// one exercise the same navmesh, the same places and the same failure lines.
+    public func applyLocally(_ directive: CharacterDirective) { apply(directive) }
+
     /// Called when the user's gaze lands on the character, or the field takes focus.
     public func addressed() { signal(.addressed) }
 

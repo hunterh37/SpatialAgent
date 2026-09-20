@@ -14,6 +14,7 @@ struct MapInspectorView: View {
     @EnvironmentObject private var session: AgentSession
     @State private var selection: UUID?
     @State private var confirmingWipe = false
+    @Environment(\.dismiss) private var dismiss
 
     /// Set on selection; the immersive view highlights this record in the room.
     @Binding var highlighted: SIMD3<Float>?
@@ -51,6 +52,14 @@ struct MapInspectorView: View {
             Button("Forget everything", role: .destructive) { confirmingWipe = true }
                 .accessibilityIdentifier("map.forgetEverything")
                 .disabled(session.places.map.isEmpty)
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Close")
+            .accessibilityIdentifier("map.close")
         }
     }
 

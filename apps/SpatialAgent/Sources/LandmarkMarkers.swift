@@ -4,30 +4,34 @@ import SceneUnderstanding
 import SpatialMemory
 import simd
 
-/// The blue spheres you grab: one per placed landmark, drawn in the immersive scene.
+/// The props you grab: one low-poly object per placed landmark, drawn in the immersive scene.
 ///
-/// Rendering and gesture plumbing only. Where a dragged marker ends up is written by
-/// `LandmarkPlacer.move`, so a drag and a spoken correction land in the map identically
-/// (docs/architecture.md §1).
+/// Rendering and gesture plumbing only. What each landmark looks like is `LandmarkProp`, and
+/// where a dragged one ends up is written by `LandmarkPlacer.move`, so a drag and a spoken
+/// correction land in the map identically (docs/architecture.md §1).
 @MainActor
 final class LandmarkMarkers {
     /// Name the drag gesture matches on, so grabbing the bird is never a landmark drag.
     static let componentName = "landmark"
 
     let root = Entity()
-    private var spheres: [String: ModelEntity] = [:]
+    /// The grabbable wrapper per preset id. The prop hangs underneath it, so swapping the
+    /// prop never invalidates the gesture's hit entity.
+    private var markers: [String: Entity] = [:]
+    /// The prop style currently drawn, so a style change rebuilds and a move does not.
+    private var styles: [String: PropStyle] = [:]
 
-    private static let radius: Float = 0.045
-
-    /// Mirrors the map onto the scene: adds new markers, moves existing ones, drops removed.
+    /// Mirrors the map onto the scene: adds new props, moves existing ones, drops removed.
     func sync(to markers: [LandmarkPlacer.Marker], dragging: String?) {
         let live = Set(markers.map(\.id))
-        for (id, entity) in spheres where !live.contains(id) {
+        for (id, entity) in self.markers where !live.contains(id) {
             entity.removeFromParent()
-            spheres.removeValue(forKey: id)
+            self.markers.removeValue(forKey: id)
+            styles.removeValue(forKey: id)
         }
         for marker in markers {
-            let entity = spheres[marker.id] ?? make(marker)
+            let entity = self.markers[marker.id] ?? make(marker)
+            if styles[marker.id] != marker.prop { rebuildProp(on: entity, marker: marker) }
             // A marker under the finger is driven by the gesture, not by the record it is
             // about to overwrite — otherwise it snaps back on every frame of the drag.
             if marker.id != dragging { entity.position = marker.position }
@@ -38,35 +42,42 @@ final class LandmarkMarkers {
     func presetId(for entity: Entity) -> String? {
         var node: Entity? = entity
         while let current = node {
-            if let id = spheres.first(where: { $0.value === current })?.key { return id }
+            if let id = markers.first(where: { $0.value === current })?.key { return id }
             node = current.parent
         }
         return nil
     }
 
-    func position(of id: String) -> SIMD3<Float>? { spheres[id]?.position }
+    func position(of id: String) -> SIMD3<Float>? { markers[id]?.position }
 
     func setPosition(_ position: SIMD3<Float>, for id: String) {
-        spheres[id]?.position = position
+        markers[id]?.position = position
     }
 
-    private func make(_ marker: LandmarkPlacer.Marker) -> ModelEntity {
-        // The perch reads brighter: it is the one marker whose placement changes idle
-        // behaviour, so it should be findable without reading a label.
-        let color: UIColor = marker.isHomePerch ? .systemTeal : .systemBlue
-        let entity = ModelEntity(
-            mesh: .generateSphere(radius: Self.radius),
-            materials: [SimpleMaterial(color: color, roughness: 0.2, isMetallic: false)]
-        )
+    private func make(_ marker: LandmarkPlacer.Marker) -> Entity {
+        let entity = Entity()
         entity.name = "\(Self.componentName).\(marker.id)"
         entity.position = marker.position
-        // Collision radius is deliberately larger than the sphere: a 4.5cm target is hard
-        // to pinch at arm's length.
-        entity.collision = CollisionComponent(shapes: [.generateSphere(radius: 0.09)])
         entity.components.set(InputTargetComponent())
         entity.components.set(HoverEffectComponent())
         root.addChild(entity)
-        spheres[marker.id] = entity
+        markers[marker.id] = entity
+        rebuildProp(on: entity, marker: marker)
         return entity
+    }
+
+    /// Swaps the drawn prop and resizes the pinch target to match it. Collision is a single
+    /// sphere sized by `LandmarkProp`: props are eight-part assemblies, and per-part shapes
+    /// would make them eight things to miss at arm's length.
+    private func rebuildProp(on entity: Entity, marker: LandmarkPlacer.Marker) {
+        for child in entity.children { child.removeFromParent() }
+        entity.addChild(LandmarkProp.make(marker.prop))
+        let radius = LandmarkProp.grabRadius(for: marker.prop)
+        entity.components.set(CollisionComponent(shapes: [
+            // Offset upward: props sit on the floor, so a sphere centred on the origin is
+            // half underneath it.
+            .generateSphere(radius: radius).offsetBy(translation: SIMD3(0, radius * 0.7, 0)),
+        ]))
+        styles[marker.id] = marker.prop
     }
 }

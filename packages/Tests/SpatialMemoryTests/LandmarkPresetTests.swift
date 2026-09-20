@@ -8,10 +8,31 @@ final class LandmarkPresetTests: XCTestCase {
         let ids = LandmarkPreset.demoRoom.map(\.id)
         XCTAssertEqual(
             ids,
-            ["perch", "workspace", "couch", "front-door", "kitchen", "plant", "snack-shelf"]
+            [
+                "perch", "food-bowl", "water-dish", "petting-spot", "toy-basket",
+                "workspace", "plant",
+            ]
         )
         XCTAssertEqual(Set(ids).count, ids.count)
         XCTAssertEqual(Set(LandmarkPreset.demoRoom.map(\.name)).count, ids.count)
+    }
+
+    /// Every need has exactly one landmark that answers it, which is what makes an
+    /// unqualified "go eat" resolvable without a name in the utterance.
+    func testEveryNeedHasExactlyOneLandmark() {
+        for need in Need.allCases {
+            let matches = LandmarkPreset.demoRoom.filter { $0.kind == need.kind }
+            XCTAssertEqual(matches.count, 1, "\(need) is answered by \(matches.count) presets")
+            XCTAssertEqual(LandmarkPreset.preset(for: need)?.kind, need.kind)
+        }
+    }
+
+    /// A landmark with no prop of its own would be drawn as a pin, and every preset in the
+    /// room is a thing the audience should recognise on sight.
+    func testEveryPresetDrawsARealProp() {
+        for preset in LandmarkPreset.demoRoom {
+            XCTAssertNotEqual(preset.prop, .marker, "\(preset.id) is still a generic pin")
+        }
     }
 
     /// Exactly one preset claims the perch role, and it is first: everything the bird does

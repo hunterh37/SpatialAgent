@@ -9,8 +9,9 @@ final class PalmDetectorTests: XCTestCase {
     ) -> (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>, SIMD3<Float>) {
         let wrist = origin
         let middle = origin + SIMD3(0, 0, -0.09)
-        let index = origin + SIMD3(-0.04, 0, -0.085)
-        let little = origin + SIMD3(0.04, 0, -0.085)
+        // Thumb side of a supinated right hand is +X, so the index knuckle is at +X.
+        let index = origin + SIMD3(0.04, 0, -0.085)
+        let little = origin + SIMD3(-0.04, 0, -0.085)
         return (wrist, index, little, middle)
     }
 

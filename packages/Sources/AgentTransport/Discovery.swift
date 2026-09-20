@@ -46,6 +46,7 @@ public final class AgentDiscovery: ObservableObject {
     @Published public private(set) var isBrowsing = false
 
     private var browser: NWBrowser?
+    private var resolvers: [String: NWConnection] = [:]
     private let log = Logger(subsystem: "io.medvr.SpatialAgent", category: "discovery")
 
     public init() {}
@@ -84,6 +85,8 @@ public final class AgentDiscovery: ObservableObject {
     }
 
     public func stop() {
+        resolvers.values.forEach { $0.cancel() }
+        resolvers.removeAll()
         browser?.cancel()
         browser = nil
         isBrowsing = false
@@ -98,20 +101,61 @@ public final class AgentDiscovery: ObservableObject {
     }
 
     private func apply(_ results: Set<NWBrowser.Result>) {
-        var found: [AgentEndpoint] = endpoints.filter(\.isManual)
+        // `.local` + the compiled-in default port is a guess: agentd may run on any port and
+        // the hostname is not always resolvable on the headset. Resolve each result to a real
+        // host and port instead, or a service shows up in the UI and never answers.
+        let manual = endpoints.filter(\.isManual)
+        var named: [String: NWBrowser.Result] = [:]
         for result in results {
             guard case let .service(name, _, _, _) = result.endpoint else { continue }
-            // Resolution to an IP happens at connect time; NWEndpoint carries the service
-            // reference and URLSession resolves `name.local`.
-            found.append(
-                AgentEndpoint(
-                    name: name,
-                    host: "\(name).local",
-                    port: DiscoveryConstants.defaultPort
-                )
-            )
+            named[name] = result
         }
-        endpoints = found
-        log.debug("discovery: \(found.count, privacy: .public) endpoint(s)")
+        endpoints = manual + endpoints.filter { !$0.isManual && named[$0.name] != nil }
+        for (name, result) in named where !endpoints.contains(where: { $0.name == name }) {
+            resolve(name: name, endpoint: result.endpoint)
+        }
+        log.debug("discovery: \(self.endpoints.count, privacy: .public) endpoint(s)")
+    }
+
+    /// Bonjour gives a service reference; a connection gives the address and port behind it.
+    /// The connection is opened only to read `currentPath`, then cancelled.
+    private func resolve(name: String, endpoint: NWEndpoint) {
+        guard resolvers[name] == nil else { return }
+        let params = NWParameters.tcp
+        params.includePeerToPeer = false
+        let connection = NWConnection(to: endpoint, using: params)
+        resolvers[name] = connection
+
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                let remote = connection.currentPath?.remoteEndpoint
+                connection.cancel()
+                guard case let .hostPort(host, port)? = remote else { return }
+                let address: String
+                switch host {
+                case let .ipv4(v4): address = "\(v4)".split(separator: "%").first.map(String.init) ?? "\(v4)"
+                case let .ipv6(v6): address = "[\("\(v6)".split(separator: "%").first.map(String.init) ?? "\(v6)")]"
+                case let .name(n, _): address = n
+                @unknown default: return
+                }
+                Task { @MainActor in
+                    self?.resolvers[name] = nil
+                    self?.add(AgentEndpoint(name: name, host: address, port: Int(port.rawValue)))
+                }
+            case .failed, .cancelled:
+                connection.cancel()
+                Task { @MainActor in self?.resolvers[name] = nil }
+            default:
+                break
+            }
+        }
+        connection.start(queue: .main)
+    }
+
+    private func add(_ endpoint: AgentEndpoint) {
+        guard !endpoints.contains(where: { $0.id == endpoint.id }) else { return }
+        endpoints.append(endpoint)
+        log.debug("resolved \(endpoint.id, privacy: .public)")
     }
 }

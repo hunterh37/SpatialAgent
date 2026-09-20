@@ -165,6 +165,11 @@ public extension LandmarkPlacer {
         public var name: String
         public var position: SIMD3<Float>
         public var isHomePerch: Bool
+        /// The prop drawn here. Carried on the marker rather than looked up in the view, so
+        /// the scene never has to know what a preset is.
+        public var prop: PropStyle
+        /// The need this landmark answers, if any.
+        public var need: Need?
     }
 
     var markers: [Marker] {
@@ -174,7 +179,9 @@ public extension LandmarkPlacer {
                 id: preset.id,
                 name: place.name,
                 position: place.position,
-                isHomePerch: place.kind == .perch
+                isHomePerch: place.kind == .perch,
+                prop: preset.prop,
+                need: preset.need
             )
         }
     }

@@ -59,9 +59,12 @@ public enum PalmDetector {
     ) -> SIMD3<Float>? {
         let index = indexKnuckle - wrist
         let little = littleKnuckle - wrist
+        // Right hand, palm up, fingers -Z: the index knuckle sits at +X and the little
+        // knuckle at -X, so index x little is the outward (upward) palmar normal. The
+        // left hand mirrors that knuckle order, hence the swapped winding.
         let raw = chirality == .right
-            ? simd_cross(little, index)
-            : simd_cross(index, little)
+            ? simd_cross(index, little)
+            : simd_cross(little, index)
         guard simd_length(raw) > 1e-6 else { return nil }
         return simd_normalize(raw)
     }
