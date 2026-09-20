@@ -107,6 +107,10 @@ the user walks behind it.
 Test: `AttentionTests` asserts head yaw never exceeds the limit, that body yaw follows after
 the delay when it would, and that head target tracking continues while a hop path is active.
 
+Status: done — `AttentionController`: three springs (eyes 42, head 14, body 7), head lag
+measured at ~110ms inside the 80–140ms window, ±75°/±40° clamps, 220ms double-take delay,
+tracking asserted mid-hop.
+
 ### A6 — Idle behavior pool
 
 New: `Bird/IdlePool.swift`.
