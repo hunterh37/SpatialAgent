@@ -89,6 +89,10 @@ Test: `ExpressionTests` asserts every case of the expression enum produces a dis
 parameter vector, that crossfade never snaps (no parameter moves more than its per-frame
 limit), and that beak closes within 120ms of the last token event.
 
+Status: done — `Expression` (9 blends over an 11-parameter face vector), `FaceController`
+(250ms crossfade, asymmetric 90/110ms blink with jitter, no blink while thinking, double blink
+on alert, beak driven by tokens and shut 120ms after the last one).
+
 ### A5 — Attention
 
 New: `Bird/AttentionController.swift`.
