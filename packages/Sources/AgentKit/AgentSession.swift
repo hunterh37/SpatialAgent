@@ -315,8 +315,30 @@ public final class AgentSession: ObservableObject {
         let deviceId = args?["device_id"]?.stringValue
         let hard = args?["hard"]?.boolValue ?? true
 
+        // Read before the act, because a completed act releases the held target.
+        let target = gaze?.target()?.point
         let outcome = await teaching.apply(act, name: name, deviceId: deviceId, hard: hard)
+        acknowledgeOnTheBody(act, target: target)
         await report(outcome, callId: callId, act: act)
+    }
+
+    /// The bird's half of the act: look now, hop if it can (spec 07 §Acknowledgement).
+    ///
+    /// Driven from here rather than from the render layer so that the 400ms budget is met by
+    /// the directive that has already been resolved, not by a later frame's guess.
+    private func acknowledgeOnTheBody(_ act: TeachingAct, target: SIMD3<Float>?) {
+        guard let target else { return }
+        emit(.look(at: target))
+        guard act != .forbidRegion,
+              let mesh = scene?.navMesh,
+              let path = mesh.path(from: characterPosition, to: target)
+        else { return }
+        emit(.walk(path: path))
+    }
+
+    private func emit(_ resolved: ResolvedDirective) {
+        lastResolved = resolved
+        directiveSink?(resolved)
     }
 
     private func report(_ outcome: TeachingOutcome, callId: String, act: TeachingAct) async {

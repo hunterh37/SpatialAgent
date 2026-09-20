@@ -289,6 +289,10 @@ Done: every act produces motion within 400ms and a spoken name-back.
 Test: `TeachingResponseTests` asserts the motion-within-400ms property for all five acts and
 that `forbid` plays `scolded`.
 
+Status: done — `TeachingResponse` plans look/hop/expression/name-back per act; `forbid` plays
+`scolded` and never hops to the region it was told to avoid. `AgentSession` drives the look
+and the hop from the held target the moment the act resolves.
+
 ### C4 — Disambiguation and correction
 
 Modifies: `teaching.py`, `SemanticMap.swift`.

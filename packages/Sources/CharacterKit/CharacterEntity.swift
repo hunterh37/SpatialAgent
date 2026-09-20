@@ -27,7 +27,7 @@ public final class CharacterEntity {
     /// tests; this class owns the wiring and nothing else.
     public private(set) var hop = HopController()
     public private(set) var animator = BirdAnimator()
-    public private(set) var face = FaceController()
+    public internal(set) var face = FaceController()
     public private(set) var attention = AttentionController()
     public private(set) var idle = IdlePool()
 
