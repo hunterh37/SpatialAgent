@@ -8,6 +8,9 @@ import simd
 
 /// The character in the room. Rendering and per-frame motion only — what the character
 /// *does* is decided in `agentd` (docs/architecture.md §8).
+///
+/// The body is the procedural bird of spec 06: no asset, no animation library, one
+/// `SceneEvents.Update` subscription driving every transform.
 struct ImmersiveView: View {
     @Environment(AppModel.self) private var model
     @EnvironmentObject private var session: AgentSession
@@ -21,7 +24,7 @@ struct ImmersiveView: View {
             root.addChild(character.root)
             content.add(root)
 
-            await character.load()
+            // Nothing to load: the bird is generated from primitives at init (spec 06).
             placeCharacter()
 
             if let bubble = attachments.entity(for: "bubble") {

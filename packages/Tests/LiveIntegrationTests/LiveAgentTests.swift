@@ -287,6 +287,42 @@ final class LiveAgentTests: XCTestCase {
         }
     }
 
+    // MARK: The bird reacts before the model does
+
+    /// Spec 06 §Mapping to agent state: a visible body change within 400ms of the utterance
+    /// ending. Asserted against the real bird driven by a real session, because the budget is
+    /// about what the user sees, not about which state enum is set.
+    func testBirdShowsAVisibleBodyChangeWithin400msOfTheUtteranceEnding() async throws {
+        let (session, _, _) = try await makeLiveSession()
+        defer { Task { @MainActor in session.disconnect() } }
+
+        let character = await MainActor.run { () -> CharacterEntity in
+            let character = CharacterEntity()
+            character.place(at: Placement.Pose(position: SIMD3(0, 0, 0.8), yaw: 0))
+            session.bindCharacter(
+                onDirective: { character.apply($0) },
+                onSignal: { character.signal($0) }
+            )
+            return character
+        }
+
+        let started = Date()
+        await MainActor.run { session.send(utterance: "what time is it") }
+
+        var visibleAfter: TimeInterval?
+        while Date().timeIntervalSince(started) < 0.4, visibleAfter == nil {
+            visibleAfter = await MainActor.run { () -> TimeInterval? in
+                character.update(deltaTime: 1.0 / 90.0, userPosition: SIMD3(0, 1.5, 0))
+                return character.hasVisibleBodyChange ? Date().timeIntervalSince(started) : nil
+            }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertNotNil(visibleAfter, "no visible body change inside the 400ms budget")
+        await MainActor.run { XCTAssertEqual(session.characterState, .thinking) }
+        try await waitUntil("the reply to finish", timeout: 90) { !session.isStreaming }
+    }
+
     /// A client with nothing remembered must not accidentally land in someone's session.
     func testColdStartGetsAFreshSession() async throws {
         let (a, _, _) = try await makeLiveSession(store: nil)

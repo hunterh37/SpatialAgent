@@ -141,6 +141,10 @@ the bird's update measured under 0.4ms on-device.
 Test: existing `CharacterTests` updated; `LiveIntegrationTests` asserts a visible body change
 within 400ms of `utteranceEnded`.
 
+Status: done — `CharacterEntity` rebuilt on `BirdRig` (capsule, USDZ load and
+`AnimationResource` indexing removed), state table wired, `BirdIntegrationTests` plus a live
+400ms body-change test. On-device frame cost still to be measured on the headset.
+
 ---
 
 ## Phase B — Semantic map foundation (spec/07-memory.md)

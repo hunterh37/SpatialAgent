@@ -16,6 +16,11 @@ public enum Placement {
         public var position: SIMD3<Float>
         /// Yaw in radians, facing the user.
         public var yaw: Float
+
+        public init(position: SIMD3<Float>, yaw: Float) {
+            self.position = position
+            self.yaw = yaw
+        }
     }
 
     public static func initialPose(

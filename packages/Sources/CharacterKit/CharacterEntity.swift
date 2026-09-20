@@ -1,133 +1,76 @@
 #if canImport(RealityKit)
 import AgentProtocol
 import Foundation
+import QuartzCore
 import RealityKit
 import SceneUnderstanding
 import simd
 
-/// The character in the room: a RealityKit entity plus a locomotion controller.
+/// The character in the room: the bird rig plus the controllers that drive it.
 ///
-/// Budget (spec/01-character.md): one skinned mesh, skeleton ≤80 joints, ~45cm tall, sharing
-/// a 90fps frame budget with scene mesh and passthrough. The placeholder capsule exists so
-/// steps 4 and 5 of the build order can be separated — directives are driven and verified
-/// before the rig lands.
+/// Everything here is procedural. There is no USDZ, no skeleton, no `AnimationResource` and no
+/// clip names — spec 06 replaced all of it with transform updates, and this type is where the
+/// `CharacterStateMachine` meets them. The previous capsule-and-clip path is gone rather than
+/// kept as a fallback: a fallback body that cannot express any of the nine expressions is a
+/// fallback that silently disables half the product.
+///
+/// One update per frame, one place, so the 0.4ms budget is measurable.
 @MainActor
 public final class CharacterEntity {
     public let root = Entity()
-    private var model: Entity?
-    private var animations: [String: AnimationResource] = [:]
-    private var playback: AnimationPlaybackController?
 
+    public private(set) var rig: BirdRig
     public private(set) var machine = CharacterStateMachine()
     public private(set) var position: SIMD3<Float> = .zero
 
-    /// Fixed and human-referenced. Life-size is uncanny at conversational distance.
-    public static let targetHeight: Float = 0.45
-
-    /// Locomotion is delegated: hopping is a spec 06 behavior with a foot-contact invariant,
-    /// and it is tested as pure state in `HopControllerTests` rather than through an entity.
+    /// Locomotion, motion core, face, attention and idle. Each is a value type with its own
+    /// tests; this class owns the wiring and nothing else.
     public private(set) var hop = HopController()
-    /// Breathing, squash and bob run underneath every state.
     public private(set) var animator = BirdAnimator()
+    public private(set) var face = FaceController()
+    public private(set) var attention = AttentionController()
+    public private(set) var idle = IdlePool()
+
+    /// 22cm at the crown (spec 06 §Proportions). Kept as a static for call sites that anchor
+    /// UI above the head.
+    public static let targetHeight: Float = BirdProportions().crownHeight
+
+    /// Wall-clock cost of the last `update`, in seconds. The 0.4ms budget is checked against
+    /// this on-device rather than inferred from a profile.
+    public private(set) var lastUpdateCost: TimeInterval = 0
+    public static let frameBudget: TimeInterval = 0.0004
+
     private var lookTarget: SIMD3<Float>?
+    private var userSilence: Float = 0
+    private var stateEntered: TimeInterval = 0
 
-    /// Metres per second taken from the walk clip's root motion. A fixed speed plus a chosen
-    /// clip is what produces foot-sliding, so this is overwritten when the rig loads and the
-    /// clip's actual root displacement is measured.
-    public private(set) var walkSpeed: Float = 0.42
-
-    public init() {
+    public init(palette: BirdPalette = .teal) {
+        rig = BirdRig(palette: palette)
         root.name = "SpatialAgent.Character"
+        root.addChild(rig.root)
+        apply(state: machine.state)
     }
 
-    // MARK: - Loading
-
-    /// Loads the rigged USDZ with its baked animation library. Falls back to a capsule so
-    /// the app is never dead while the art is in flight.
-    public func load(named name: String = "Character", in bundle: Bundle = .main) async {
-        if let entity = try? await Entity(named: name, in: bundle) {
-            install(entity)
-            indexAnimations(of: entity)
-            if let walk = animations["walk"] {
-                walkSpeed = Self.rootMotionSpeed(of: walk) ?? walkSpeed
-            }
-        } else {
-            install(Self.placeholder())
-        }
-    }
-
-    private func install(_ entity: Entity) {
-        model?.removeFromParent()
-        model = entity
-        root.addChild(entity)
-        normalizeScale(entity)
-    }
-
-    /// Scales the rig to `targetHeight` so art can ship at any authored size.
-    private func normalizeScale(_ entity: Entity) {
-        let bounds = entity.visualBounds(relativeTo: nil)
-        let height = bounds.extents.y
-        guard height > 0.01 else { return }
-        entity.scale *= SIMD3(repeating: Self.targetHeight / height)
-    }
-
-    private func indexAnimations(of entity: Entity) {
-        for animation in entity.availableAnimations {
-            guard let name = animation.name?.lowercased() else { continue }
-            for key in ["idle", "walk", "turn", "talk", "point", "gesture", "think"]
-            where name.contains(key) {
-                animations[key] = animation
-            }
-        }
-    }
-
-    /// Measures the clip's root displacement so locomotion speed derives from the animation
-    /// rather than the reverse. Returns nil when the clip has no usable root motion, in
-    /// which case the authored default stands and foot contact must be checked by eye.
-    private static func rootMotionSpeed(of animation: AnimationResource) -> Float? {
-        let duration = Float(animation.definition.duration)
-        guard duration > 0.01 else { return nil }
-        // RealityKit does not expose sampled root translation directly; the rig is authored
-        // with a documented stride length in its metadata. See docs/middle-layer-todo.md.
-        return nil
-    }
-
-    /// Red capsule stand-in driven by the agent loop while the rig is in flight.
-    private static func placeholder() -> Entity {
-        let height: Float = 0.34
-        let radius: Float = 0.08
-        // `MeshResource.generateCapsule` is not in every SDK this package builds against;
-        // a fully rounded box reads as a capsule at 45cm.
-        let mesh = MeshResource.generateBox(
-            size: SIMD3(radius * 2, height, radius * 2),
-            cornerRadius: radius
-        )
-        var material = PhysicallyBasedMaterial()
-        material.baseColor = .init(tint: .red)
-        material.roughness = 0.35
-        material.metallic = 0.0
-        material.emissiveColor = .init(color: .red)
-        material.emissiveIntensity = 0.25
-        let body = ModelEntity(mesh: mesh, materials: [material])
-        body.position.y = height / 2 + radius
-        // Tap target for addressing; the capsule has no rig to hit-test against.
-        body.components.set(InputTargetComponent())
-        body.components.set(
-            CollisionComponent(shapes: [.generateCapsule(height: height + radius * 2, radius: radius)])
-        )
-        let wrapper = Entity()
-        wrapper.addChild(body)
-        return wrapper
+    /// Swaps the colour variant. Chosen at hatch and changeable (spec 06 §Variants).
+    public func wear(_ palette: BirdPalette) {
+        let pose = (position, hop.yaw)
+        rig.root.removeFromParent()
+        rig = BirdRig(palette: palette)
+        root.addChild(rig.root)
+        hop.place(at: pose.0, yaw: pose.1)
+        position = pose.0
     }
 
     // MARK: - Placement
 
     public func place(at pose: Placement.Pose) {
-        hop.place(at: pose.position, yaw: pose.yaw)
         position = pose.position
+        hop.place(at: pose.position, yaw: pose.yaw)
         root.position = pose.position
         root.orientation = simd_quatf(angle: pose.yaw, axis: SIMD3(0, 1, 0))
-        play(.idle)
+        attention.reset()
+        machine.handle(.settled)
+        apply(state: machine.state)
     }
 
     // MARK: - Directives
@@ -141,48 +84,106 @@ public final class CharacterEntity {
                 // partially hops toward a wall (spec 06 §Locomotion).
                 machine.handle(.interrupted)
             } else {
-                // Hops turn between arcs, on the ground, so there is no separate turn state
-                // to wait out.
+                // Hops turn between arcs, on the ground, so there is no turn state to wait out.
                 machine.handle(.turnComplete)
             }
-            play(machine.state)
         case let .look(at: target):
             lookTarget = target
         case let .point(at: target):
             lookTarget = target
             machine.handle(.gestureStarted)
-            play(.gesturing)
         case .emote, .gesture:
             machine.handle(.gestureStarted)
-            play(.gesturing)
         case .idle:
             hop.stop()
             machine.handle(.settled)
-            play(.idle)
         case .unresolved:
             // Resolution failure never moves the character. It speaks from where it stands.
+            hop.stop()
             machine.handle(.interrupted)
-            play(.idle)
         }
+        apply(state: machine.state)
     }
 
     public func signal(_ event: CharacterEvent) {
         let before = machine.state
         let after = machine.handle(event)
-        if before != after { play(after) }
+        if event == .addressed || event == .utteranceEnded { userSilence = 0 }
+        if event == .firstToken { face.noteToken() }
+        if event == .speechEnded || event == .interrupted { face.silence() }
+        if before != after { apply(state: after) }
+    }
+
+    /// Speech amplitude envelope while `speaking`. The beak follows real tokens, never a guess.
+    public func speechToken(amplitude: Float) {
+        face.noteToken(amplitude: amplitude)
+    }
+
+    // MARK: - State mapping (spec 06 §Mapping to agent state)
+
+    private func apply(state: CharacterState) {
+        stateEntered = CACurrentMediaTime()
+        switch state {
+        case .idle:
+            face.set(.neutral)
+            animator.breathRate = 1.0
+            animator.breathDepth = 1.0
+        case .listening:
+            // Turns to the user, head tilt, crest forward, blinking slows.
+            face.set(.curious)
+            idle.interrupt()
+            animator.breathRate = 1.0
+        case .thinking:
+            // Look up and away, crest half-flat, slow drift, no blink.
+            face.set(.thinking)
+            idle.interrupt()
+            lookTarget = nil
+            animator.breathRate = 0.8
+        case .speaking:
+            face.set(.happy)
+            idle.interrupt()
+            animator.breathRate = 1.1
+        case .walking, .turning:
+            idle.interrupt()
+            animator.breathRate = 1.4
+        case .arriving:
+            // A settle: one small shuffle, wing fold, blink.
+            face.set(.neutral)
+            animator.breathRate = 1.2
+        case .gesturing:
+            face.set(.alert)
+            idle.interrupt()
+        }
+    }
+
+    /// Time since the current state was entered. `thinking` has a 400ms budget from
+    /// end-of-utterance and the procedural entry has to land inside it.
+    public var timeInState: TimeInterval { CACurrentMediaTime() - stateEntered }
+
+    /// The body change the spec's 400ms budget is measured against: a pose distinct from
+    /// neutral, reached without waiting on the model.
+    public var hasVisibleBodyChange: Bool {
+        FaceParameters.distance(face.expressionParameters, Expression.neutral.parameters) > 0.02
     }
 
     // MARK: - Per-frame update
 
-    /// Called from a `SceneEvents.Update` subscription. Keeps all motion in one place so
-    /// the frame cost is measurable.
+    /// Called from a `SceneEvents.Update` subscription. Keeps all motion in one place so the
+    /// frame cost is measurable.
     public func update(deltaTime: Float, userPosition: SIMD3<Float>) {
+        let started = CACurrentMediaTime()
+        defer { lastUpdateCost = CACurrentMediaTime() - started }
+
+        userSilence += deltaTime
         animator.update(deltaTime: deltaTime)
-        advanceAlongPath(deltaTime: deltaTime)
-        faceTarget(deltaTime: deltaTime, userPosition: userPosition)
+        face.update(deltaTime: deltaTime)
+        advanceLocomotion(deltaTime: deltaTime)
+        advanceAttention(deltaTime: deltaTime, userPosition: userPosition)
+        advanceIdle(deltaTime: deltaTime)
+        writeToRig()
     }
 
-    private func advanceAlongPath(deltaTime: Float) {
+    private func advanceLocomotion(deltaTime: Float) {
         guard hop.isMoving else { return }
         for event in hop.update(deltaTime: deltaTime) {
             switch event {
@@ -193,56 +194,108 @@ public final class CharacterEntity {
             }
         }
         position = hop.position
-        root.position = SIMD3(position.x, position.y + hop.bobHeight, position.z)
-        root.orientation = simd_quatf(angle: hop.yaw, axis: SIMD3(0, 1, 0))
     }
 
-    private func faceTarget(deltaTime: Float, userPosition: SIMD3<Float>) {
-        guard machine.state != .walking, machine.state != .turning else { return }
-        let target = lookTarget ?? userPosition
-        let delta = SIMD3(target.x - position.x, 0, target.z - position.z)
-        guard simd_length(delta) > 0.05 else { return }
-        let desired = atan2(delta.x, delta.z)
-        let current = currentYaw()
-        let step = shortestAngle(from: current, to: desired)
-        let maxStep = Float.pi * 0.9 * deltaTime
-        root.orientation = simd_quatf(
-            angle: current + max(-maxStep, min(maxStep, step)),
-            axis: SIMD3(0, 1, 0)
-        )
-    }
-
-    private func currentYaw() -> Float {
-        let q = root.orientation
-        return atan2(
-            2 * (q.real * q.imag.y + q.imag.x * q.imag.z),
-            1 - 2 * (q.imag.y * q.imag.y + q.imag.x * q.imag.x)
-        )
-    }
-
-    private func shortestAngle(from: Float, to: Float) -> Float {
-        var delta = to - from
-        while delta > .pi { delta -= 2 * .pi }
-        while delta < -.pi { delta += 2 * .pi }
-        return delta
-    }
-
-    // MARK: - Animation
-
-    private func play(_ state: CharacterState) {
-        let clip: String
-        switch state {
-        case .walking, .turning, .arriving: clip = "walk"
-        case .speaking: clip = "talk"
-        case .thinking: clip = "think"
-        case .gesturing: clip = "gesture"
-        case .listening, .idle: clip = "idle"
+    private func advanceAttention(deltaTime: Float, userPosition: SIMD3<Float>) {
+        // Thinking looks up and away; everything else looks at the directive target, or at
+        // the user when there is none.
+        if machine.state == .thinking {
+            attention.target = position + SIMD3(0.4, 0.9, 0.5)
+        } else {
+            attention.target = lookTarget ?? userPosition
         }
-        guard let model, let animation = animations[clip] ?? animations["idle"] else { return }
-        playback = model.playAnimation(
-            animation.repeat(),
-            transitionDuration: machine.lastCrossfade,
-            startsPaused: false
+        attention.update(deltaTime: deltaTime, origin: headOrigin(), bodyYaw: hop.yaw)
+
+        // The double-take: the body turns to follow only when the head has run out of reach
+        // and only when locomotion is not already using the body.
+        if let requested = attention.bodyTurnRequest, !hop.isMoving {
+            hop.place(at: position, yaw: requested)
+            attention.bodyTurnServed()
+        }
+    }
+
+    private func advanceIdle(deltaTime: Float) {
+        guard machine.state == .idle, !hop.isMoving else { return }
+        idle.userSilence = userSilence
+        guard let behavior = idle.update(deltaTime: deltaTime) else { return }
+        switch behavior {
+        case .smallHop:
+            // A hop in place: the arc runs, the path is one step forward of nothing.
+            animator.anticipate()
+        case .settle:
+            animator.breathDepth = 0.7
+        case .headTilt:
+            face.set(.curious)
+        case .lookAround, .preenWing, .shuffleTurn, .stretchWings, .scratch:
+            face.set(.neutral)
+        }
+    }
+
+    /// Writes this frame's values onto the rig. Every entity touched per frame is touched
+    /// here and nowhere else.
+    private func writeToRig() {
+        root.position = SIMD3(position.x, position.y, position.z)
+        root.orientation = simd_quatf(angle: hop.yaw, axis: SIMD3(0, 1, 0))
+
+        let parameters = face.parameters
+        let scale = rig.proportions.normalizationScale
+
+        if let bob = rig.entity(.bob) {
+            bob.position.y = hop.bobHeight
+        }
+        if let body = rig.entity(.body) {
+            body.scale = rig.proportions.bodyScale * animator.bodyScale
+            body.position.y = rig.proportions.bodyCenterY
+                + (hop.bodyDip + parameters.bodyRaise * rig.proportions.bodyDiameter) / scale
+        }
+        if let head = rig.entity(.head) {
+            head.orientation = simd_quatf(angle: attention.headYaw, axis: SIMD3(0, 1, 0))
+                * simd_quatf(angle: -attention.headPitch, axis: SIMD3(1, 0, 0))
+                * simd_quatf(angle: parameters.headTilt, axis: SIMD3(0, 0, 1))
+                * simd_quatf(angle: parameters.headPitch, axis: SIMD3(1, 0, 0))
+        }
+        for (joint, side) in [(BirdRig.Joint.eyeL, Float(-1)), (.eyeR, 1)] {
+            guard let eye = rig.entity(joint) else { continue }
+            eye.scale = SIMD3(1, max(0.05, parameters.eyeOpen), 1)
+            if let pupil = eye.children.first {
+                let reach = rig.proportions.eyeRadius * 0.45
+                pupil.position.x = attention.pupilOffset.x * reach
+                pupil.position.y = attention.pupilOffset.y * reach
+                pupil.scale = SIMD3(repeating: parameters.pupilDilation)
+            }
+            if let brow = rig.entity(joint == .eyeL ? .browL : .browR) {
+                let inner = parameters.browInner + side * parameters.browAsymmetry * 0.5
+                brow.position.y = rig.proportions.browRise + inner * 0.006
+                brow.orientation = simd_quatf(
+                    angle: side * (parameters.browOuter - inner) * 0.6,
+                    axis: SIMD3(0, 0, 1)
+                )
+            }
+        }
+        if let beak = rig.entity(.beak) {
+            beak.orientation = simd_quatf(angle: .pi / 2 + parameters.beakOpen, axis: SIMD3(1, 0, 0))
+        }
+        if let crest = rig.entity(.crest) {
+            crest.orientation = simd_quatf(angle: -parameters.crestLean * 0.5, axis: SIMD3(1, 0, 0))
+            crest.scale = SIMD3(1 + parameters.crestSpread * 0.4, 1, 1)
+        }
+        for (joint, side) in [(BirdRig.Joint.wingL, Float(-1)), (.wingR, 1)] {
+            guard let wing = rig.entity(joint) else { continue }
+            wing.orientation = simd_quatf(
+                angle: side * hop.wingExtension * 0.9,
+                axis: SIMD3(0, 0, 1)
+            )
+        }
+        if let tail = rig.entity(.tail) {
+            tail.orientation = simd_quatf(angle: 0.32 + hop.tailPitch, axis: SIMD3(1, 0, 0))
+        }
+    }
+
+    private func headOrigin() -> SIMD3<Float> {
+        SIMD3(
+            position.x,
+            position.y + rig.proportions.headCenterY * rig.proportions.normalizationScale,
+            position.z
         )
     }
 }
