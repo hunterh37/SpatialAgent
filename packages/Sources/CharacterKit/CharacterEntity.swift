@@ -231,7 +231,39 @@ public final class CharacterEntity {
         advanceAttention(deltaTime: deltaTime, userPosition: userPosition)
         advanceIdle(deltaTime: deltaTime)
         writeToRig()
+        assertPresenceInvariants()
     }
+
+    /// The two presence rules, asserted every frame in debug builds.
+    ///
+    /// Both are properties the unit tests cover, and both are the kind of thing a later
+    /// change breaks quietly: a foot 3cm under the floor reads as "slightly off" on a
+    /// screenshot and as "the illusion is gone" on a head. Failing loudly in the simulator is
+    /// cheaper than noticing on-device (docs/development-plan.md, Cross-cutting).
+    private func assertPresenceInvariants() {
+        #if DEBUG
+        let floorY = hop.position.y
+        let lowest = root.position.y + (rig.entity(.bob)?.position.y ?? 0)
+        assert(
+            lowest >= floorY - 0.001,
+            "the bird sank through the floor: lowest \(lowest) < floor \(floorY)"
+        )
+        assert(
+            hop.isGrounded ? abs(hop.bobHeight) < 0.001 : true,
+            "a foot is off the floor on a grounded frame: bob \(hop.bobHeight)"
+        )
+        if let mesh = navMeshForAssertions {
+            assert(
+                mesh.isWalkable(position) || !hop.isMoving,
+                "the bird is standing in geometry at \(position)"
+            )
+        }
+        #endif
+    }
+
+    /// Set by the render layer so the debug assertions can check the never-in-geometry rule.
+    /// Nil in tests and in release, where the assertion does not run anyway.
+    public var navMeshForAssertions: NavMesh?
 
     private func advancePerch(deltaTime: Float) {
         guard perch.isEngaged else { return }

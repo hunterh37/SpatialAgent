@@ -444,9 +444,18 @@ Status: done.
 **Performance.** The bird's per-frame cost is measured on-device at the end of phase A and
 re-measured at the end of D. Budget 0.4ms. A phase that exceeds it does not close.
 
+Status: instrumented, not yet measured on hardware. `CharacterEntity.lastUpdateCost` times
+every frame and `CharacterEntity.frameBudget` is the 0.4ms figure; `BirdIntegrationTests`
+holds the shape of the cost on a Mac. The on-device number is the one that counts and it
+needs a headset.
+
 **Presence regressions.** The feet-on-floor and never-in-geometry properties get an assertion
 in the update loop under debug builds, so a regression fails loudly in the simulator rather
 than quietly on someone's head.
+
+Status: done — `CharacterEntity.assertPresenceInvariants` runs every frame under `DEBUG`:
+lowest point at or above the floor, no bob on a grounded frame, and (when the render layer
+supplies the mesh) never standing in geometry while moving.
 
 **Protocol.** Every schema change runs `make protocol` before either language is touched.
 

@@ -62,6 +62,9 @@ struct ImmersiveView: View {
             highlight.isEnabled = false
             root.addChild(highlight)
 
+            // Debug-only presence checks need the mesh the character is standing on.
+            character.navMeshForAssertions = model.scene.navMesh
+
             _ = content.subscribe(to: SceneEvents.Update.self) { _ in
                 if let position = model.highlightedRecord {
                     highlight.position = SIMD3(position.x, position.y + 0.06, position.z)
