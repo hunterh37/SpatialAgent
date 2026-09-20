@@ -250,6 +250,10 @@ Done: looking at a desk and speaking captures the desk's extent, not a point.
 Test: `GazeTargetTests` against a synthetic mesh asserts radius derivation per surface class
 and that the held target is the utterance-start target, not the end one.
 
+Status: done — `GazeTarget`/`GazeHit`/`GazeCapture` plus `SyntheticSceneMesh`; radius rules
+(floor 1.0m, surface extent clamped 0.3–2.0m, cluster bounds +10cm), hold-from-utterance-start,
+and the one follow-up turn when gaze misses.
+
 ### C2 — Teaching intent recognition
 
 New: `services/agentd/agentd/teaching.py`. Modifies `session.py`, `directives.py`, schema.
