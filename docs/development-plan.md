@@ -53,6 +53,9 @@ stable at 90fps and at 30fps without overshoot divergence.
 Test: `BirdAnimatorTests` steps the spring at both frame rates and asserts convergence with
 no oscillation past tolerance; asserts breathing amplitude stays within 2% body scale.
 
+Status: done — `Spring`/`AngularSpring` (substepped, stable and equal at 30 and 90fps), `Easing`,
+`Squash` (1.08/0.88, 60ms hold, 140ms release) and `BirdAnimator` breathing at 0.25Hz/2%.
+
 ### A3 — Hop locomotion
 
 New: `Bird/HopController.swift`. Modifies `CharacterEntity` to delegate path following.
