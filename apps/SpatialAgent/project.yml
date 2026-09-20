@@ -1,0 +1,22 @@
+name: SpatialAgent
+options:
+  bundleIdPrefix: io.medvr
+  deploymentTarget:
+    visionOS: "2.0"
+  createIntermediateGroups: true
+targets:
+  SpatialAgent:
+    type: application
+    platform: visionOS
+    sources:
+      - path: Sources
+      - path: Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.medvr.SpatialAgent
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: SpatialAgent
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "7"
+        ENABLE_PREVIEWS: YES
