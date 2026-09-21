@@ -28,6 +28,9 @@ public struct Mood: Sendable {
         case questionAnswered
         case questionIgnored
         case actionCancelled
+        /// Swatted off a perch. Costs more than an ignored question and less than nothing
+        /// else does, because it is the only input that is a hand landing on the bird.
+        case knockedOff
 
         /// Signed step per occurrence.
         var step: Float {
@@ -37,6 +40,7 @@ public struct Mood: Sendable {
             case .questionAnswered: return 0.05
             case .questionIgnored: return -0.04
             case .actionCancelled: return -0.02
+            case .knockedOff: return -0.06
             }
         }
 
@@ -48,7 +52,8 @@ public struct Mood: Sendable {
             case .actionSucceeded: return 0.12
             case .questionAnswered: return 0.15
             // Negative inputs are not capped: ignoring every question should keep costing.
-            case .questionIgnored, .actionCancelled: return .greatestFiniteMagnitude
+            case .questionIgnored, .actionCancelled, .knockedOff:
+                return .greatestFiniteMagnitude
             }
         }
     }

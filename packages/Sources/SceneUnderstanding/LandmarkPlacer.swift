@@ -70,7 +70,8 @@ public final class LandmarkPlacer {
             radius: radius,
             kind: preset.kind,
             anchorId: anchorId,
-            hasRelocalized: relocalized
+            hasRelocalized: relocalized,
+            elevation: preset.height
         )
         let outcome = store.add(place)
         let id: UUID
@@ -79,8 +80,10 @@ public final class LandmarkPlacer {
         case let .corrected(corrected): id = corrected
         }
 
-        // Exactly one home perch: placing a new one moves the role off the old place.
-        if preset.isHomePerch { store.setHomePerch(id: id) }
+        // No promotion here any more. The room has three perches and they are equals: which
+        // one the bird uses is `PerchMemory`'s answer, learned from knock-offs, not a role
+        // stamped on one record at placement time. `set_home_perch` still promotes exactly
+        // one record, because that is a user saying "this one" out loud.
 
         if let kind = preset.rule {
             store.add(
@@ -164,12 +167,19 @@ public extension LandmarkPlacer {
         public var id: String
         public var name: String
         public var position: SIMD3<Float>
-        public var isHomePerch: Bool
+        /// Metres from the floor point to the crossbar the bird stands on.
+        public var height: Float
+        public var isPerch: Bool
+        /// Times the user has swatted the bird off this one. Drawn as wear on the prop, so
+        /// the learning is visible in the room and not only in the inspector.
+        public var knockOffs: Int
         /// The prop drawn here. Carried on the marker rather than looked up in the view, so
         /// the scene never has to know what a preset is.
         public var prop: PropStyle
         /// The need this landmark answers, if any.
         public var need: Need?
+        /// The prop's paint, carried from the preset so the view never looks a preset up.
+        public var tint: PropTint
     }
 
     var markers: [Marker] {
@@ -179,9 +189,12 @@ public extension LandmarkPlacer {
                 id: preset.id,
                 name: place.name,
                 position: place.position,
-                isHomePerch: place.kind == .perch,
+                height: place.elevation,
+                isPerch: place.kind == .perch,
+                knockOffs: place.knockOffs,
                 prop: preset.prop,
-                need: preset.need
+                need: preset.need,
+                tint: preset.tint
             )
         }
     }

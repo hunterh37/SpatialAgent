@@ -4,7 +4,9 @@ import simd
 @testable import SceneUnderstanding
 
 /// `set_home_perch`, client half. The server only says the kind is `perch`; which record
-/// carries it, and the fact that exactly one does, is decided here.
+/// carries it is decided here — and it is always one of the three coloured presets, because
+/// the learned-choice line reads the perch's name out loud and the room has no colour for a
+/// name this path made up.
 @MainActor
 final class HomePerchTests: XCTestCase {
     private let down = SIMD3<Float>(0, -1, 0)
@@ -25,18 +27,45 @@ final class HomePerchTests: XCTestCase {
         gaze.beginUtterance(origin: SIMD3(-1.5, 1.5, 1.5), direction: down)
     }
 
-    func testPerchFromGazeWritesAPlaceWithAnAnchorAndAnEpisode() async throws {
+    func testPerchFromGazeAdoptsTheNextColouredPresetRatherThanInventingAName() async throws {
         let (teaching, store, gaze, _) = setup(suite: "perch-\(UUID().uuidString)")
         lookAtDesk(gaze)
         let outcome = await teaching.apply(.setHomePerch, name: "")
 
         guard case let .taught(act, name, id) = outcome else { return XCTFail("\(outcome)") }
         XCTAssertEqual(act, .setHomePerch)
-        XCTAssertEqual(name, "your perch")
+        XCTAssertEqual(name, "the red perch")
         let perch = try XCTUnwrap(store.map.homePerch)
         XCTAssertEqual(perch.id, id)
         XCTAssertEqual(perch.kind, .perch)
+        XCTAssertEqual(perch.elevation, LandmarkPreset.perchHeight)
         XCTAssertTrue(store.map.episodes.contains { $0.placeId == id || $0.summary.contains("set_home_perch") })
+    }
+
+    /// The regression: two perches taught in an empty room are the red one and the blue one.
+    /// "your perch" was a fourth, unnamed perch that then won the choice and was narrated.
+    func testTwoPerchesTaughtInAnEmptyRoomAreRedThenBlue() async {
+        let (teaching, store, gaze, _) = setup(suite: "perch-\(UUID().uuidString)")
+        lookAtDesk(gaze)
+        await teaching.apply(.setHomePerch, name: "")
+        lookAtFloor(gaze)
+        await teaching.apply(.setHomePerch, name: "")
+
+        XCTAssertEqual(store.map.perches.map(\.name), ["the red perch", "the blue perch"])
+        XCTAssertNil(store.resolve("your perch"))
+    }
+
+    /// Looking at a perch that is already there is a reference to it, not a fourth record.
+    func testLookingAtAnExistingPerchBindsToItInsteadOfAddingOne() async {
+        let (teaching, store, gaze, _) = setup(suite: "perch-\(UUID().uuidString)")
+        lookAtDesk(gaze)
+        await teaching.apply(.setHomePerch, name: "")
+        lookAtDesk(gaze)
+        let outcome = await teaching.apply(.setHomePerch, name: "")
+
+        guard case let .corrected(_, name, _) = outcome else { return XCTFail("\(outcome)") }
+        XCTAssertEqual(name, "the red perch")
+        XCTAssertEqual(store.map.places.count, 1)
     }
 
     func testPerchWithNoGazeStaysOpenForAFollowUp() async {
@@ -60,32 +89,20 @@ final class HomePerchTests: XCTestCase {
         XCTAssertEqual(act, .setHomePerch)
         XCTAssertEqual(name, "the shelf")
         XCTAssertEqual(id, shelf.id)
-        XCTAssertEqual(store.map.homePerch?.id, shelf.id)
-        XCTAssertEqual(store.map.homePerch?.position, shelf.position)
+        XCTAssertEqual(store.resolve("the shelf")?.kind, .perch)
+        XCTAssertEqual(store.resolve("the shelf")?.position, shelf.position)
         XCTAssertEqual(store.map.places.count, 1, "promotion is not a second record")
-    }
-
-    func testOnlyOnePerchSurvivesAndTheOldOneKeepsItsName() async {
-        let (teaching, store, gaze, _) = setup(suite: "perch-\(UUID().uuidString)")
-        lookAtDesk(gaze)
-        await teaching.apply(.setHomePerch, name: "the shelf")
-        lookAtFloor(gaze)
-        await teaching.apply(.setHomePerch, name: "the ledge")
-
-        XCTAssertEqual(store.map.places.filter { $0.kind == .perch }.count, 1)
-        XCTAssertEqual(store.map.homePerch?.name, "the ledge")
-        XCTAssertEqual(store.resolve("the shelf")?.kind, .generic, "demoted, not deleted")
     }
 
     func testPerchSurvivesAMapStoreReload() async throws {
         let suite = "perch-\(UUID().uuidString)"
         let (teaching, store, gaze, defaults) = setup(suite: suite)
         lookAtDesk(gaze)
-        await teaching.apply(.setHomePerch, name: "the shelf")
+        await teaching.apply(.setHomePerch, name: "")
         let id = try XCTUnwrap(store.map.homePerch?.id)
 
         let reloaded = MapStore(defaults: defaults)
         XCTAssertEqual(reloaded.map.homePerch?.id, id)
-        XCTAssertEqual(reloaded.map.homePerch?.name, "the shelf")
+        XCTAssertEqual(reloaded.map.homePerch?.name, "the red perch")
     }
 }

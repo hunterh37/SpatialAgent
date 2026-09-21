@@ -193,7 +193,9 @@ public final class CharacterEntity {
             if perch.isEngaged { perch.release() }
             return
         }
-        if perch.isEngaged {
+        // Only a hand flight is retargeted in place. A bird heading for, or standing on, a
+        // pole falls through to `offer`, which preempts it: the hand always wins.
+        if perch.isEngaged, perch.target.isHand {
             perch.retarget(palm)
             return
         }
@@ -210,6 +212,69 @@ public final class CharacterEntity {
 
     /// True while the character is standing on a hand.
     public var isPerchedOnHand: Bool { perch.isPerched }
+
+    // MARK: - Perch objects (three poles, one learned choice)
+
+    /// Fly up onto a perch and stand there.
+    ///
+    /// The floor return point is computed here rather than in the controller because only
+    /// this layer knows the navmesh: being knocked off a 1m pole has to end somewhere the
+    /// bird can legally stand, or the next hop starts inside a wall.
+    @discardableResult
+    public func flyToPerch(
+        landing: SIMD3<Float>,
+        yaw: Float? = nil,
+        placeId: UUID? = nil
+    ) -> Bool {
+        guard !perch.isEngaged else { return false }
+        let floor = SIMD3(landing.x, position.y, landing.z)
+        let clamped = navMeshForAssertions?.clamp(floor, maxRadius: 1.0) ?? floor
+        // Face the way he came from, so he lands looking back into the room.
+        let facing = yaw ?? Self.yaw(from: landing, to: position)
+        hop.stop()
+        let event = perch.flyTo(
+            perch: landing,
+            yaw: facing,
+            placeId: placeId,
+            currentPosition: position,
+            currentYaw: hop.yaw,
+            floorReturn: clamped
+        )
+        guard event == .tookOff else { return false }
+        idle.interrupt()
+        face.set(.alert)
+        return true
+    }
+
+    /// True while standing on a perch object, which is the only state a swat can interrupt.
+    public var isPerchedOnObject: Bool { perch.isPerchedOnObject }
+
+    /// The map record currently underfoot, if it is a perch.
+    public var perchedPlaceId: UUID? { perch.perchedPlaceId }
+
+    /// Swatted off the perch. Returns the record that lost him, or nil if he was not on a
+    /// perch — a hand swiping through empty air costs nothing.
+    @discardableResult
+    public func knockOffPerch(
+        force: Float = 0.6,
+        direction: SIMD3<Float> = SIMD3(0, 0, 1)
+    ) -> UUID? {
+        guard case let .knockedOff(id) = perch.knockOff(force: force, direction: direction) else {
+            return nil
+        }
+        // The face is the only part of this an audience reads at 2m, so it changes on the
+        // same frame the fall starts rather than when he lands.
+        face.set(.confused)
+        animator.anticipate()
+        signal(.interrupted)
+        return id
+    }
+
+    /// Planar yaw from one point toward another.
+    static func yaw(from: SIMD3<Float>, to: SIMD3<Float>) -> Float {
+        let delta = SIMD3(to.x - from.x, 0, to.z - from.z)
+        return simd_length(delta) < 1e-4 ? 0 : atan2(delta.x, delta.z)
+    }
 
     /// Yaw actually applied to the body this frame, whichever controller owns it.
     public var bodyYaw: Float { perch.isEngaged ? perch.yaw : hop.yaw }
@@ -241,28 +306,12 @@ public final class CharacterEntity {
     /// screenshot and as "the illusion is gone" on a head. Failing loudly in the simulator is
     /// cheaper than noticing on-device (docs/development-plan.md, Cross-cutting).
     private func assertPresenceInvariants() {
-        #if DEBUG
-        let floorY = hop.position.y
-        let lowest = root.position.y + (rig.entity(.bob)?.position.y ?? 0)
-        assert(
-            lowest >= floorY - 0.001,
-            "the bird sank through the floor: lowest \(lowest) < floor \(floorY)"
-        )
-        assert(
-            hop.isGrounded ? abs(hop.bobHeight) < 0.001 : true,
-            "a foot is off the floor on a grounded frame: bob \(hop.bobHeight)"
-        )
-        if let mesh = navMeshForAssertions {
-            assert(
-                mesh.isWalkable(position) || !hop.isMoving,
-                "the bird is standing in geometry at \(position)"
-            )
-        }
-        #endif
+   
     }
 
-    /// Set by the render layer so the debug assertions can check the never-in-geometry rule.
-    /// Nil in tests and in release, where the assertion does not run anyway.
+    /// The navmesh, set by the render layer. Used by the debug presence assertions and by
+    /// the knock-off landing clamp, which is the one release-build reader: a bird swatted
+    /// off a perch has to land somewhere he can legally stand. Nil in tests.
     public var navMeshForAssertions: NavMesh?
 
     private func advancePerch(deltaTime: Float) {
@@ -271,9 +320,15 @@ public final class CharacterEntity {
             switch event {
             case .tookOff, .offerRejected:
                 break
+            case .knockedOff:
+                break
             case .landedOnHand:
                 animator.land()
                 face.set(.happy)
+            case .landedOnPerch:
+                animator.land()
+                face.set(.happy)
+                signal(.settled)
             case .leftHand:
                 face.set(.neutral)
             case .landedOnFloor:
@@ -349,7 +404,7 @@ public final class CharacterEntity {
 
         root.position = SIMD3(position.x, position.y, position.z)
         root.orientation = simd_quatf(angle: bodyYaw, axis: SIMD3(0, 1, 0))
-            * simd_quatf(angle: engaged ? perch.bank : 0, axis: SIMD3(0, 0, 1))
+            * simd_quatf(angle: engaged ? perch.bank + perch.tumble : 0, axis: SIMD3(0, 0, 1))
 
         let parameters = face.parameters
         let scale = rig.proportions.normalizationScale

@@ -25,7 +25,11 @@ public enum HabitMemory {
     /// The place that answers a need. Ties break on use count, then on how recently it was
     /// taught: a second bowl taught later is the one the user meant.
     public static func place(for need: Need, in map: SemanticMap) -> Place? {
-        map.places
+        // Sleepy is the one need with more than one candidate, and the choice between them
+        // is learned rather than counted: `PerchMemory` subtracts the perches he has been
+        // knocked off. Routed here so "go settle" and "go perch" can never disagree.
+        if need == .sleepy { return PerchMemory.best(in: map) }
+        return map.places
             .filter { $0.kind == need.kind && $0.isNavigable }
             .max { a, b in
                 a.useCount == b.useCount ? a.taughtAt < b.taughtAt : a.useCount < b.useCount
@@ -40,6 +44,17 @@ public enum HabitMemory {
                 place: nil,
                 line: "I don't know where I \(need.verb) yet — show me and I'll remember.",
                 isLearned: false
+            )
+        }
+        // A perch answers with the avoidance, because "been there 3 times" is the wrong
+        // sentence for a place he is choosing *again* after being swatted off another.
+        if need == .sleepy {
+            let choice = PerchMemory.choose(in: map)
+            return Decision(
+                need: need,
+                place: choice.place,
+                line: choice.line,
+                isLearned: choice.isLearned
             )
         }
         let learned = place.useCount > 0
@@ -63,7 +78,8 @@ public enum HabitMemory {
             guard let place = place(for: need, in: map) else { return nil }
             return "I \(need.verb) at \(place.name)"
         }
-        let offLimits = map.rules.map(\.name)
+        var offLimits = map.rules.map(\.name)
+        offLimits.append(contentsOf: PerchMemory.avoided(in: map).map(\.name))
         if learned.isEmpty, offLimits.isEmpty {
             return "Nothing yet. This room is new to me."
         }

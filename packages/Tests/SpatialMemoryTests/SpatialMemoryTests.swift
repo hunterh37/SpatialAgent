@@ -363,4 +363,25 @@ final class MapStoreTests: XCTestCase {
         XCTAssertEqual(snapshot.places.count, 1)
         XCTAssertEqual(snapshot.places[0].name, "kitchen")
     }
+
+    /// Rooms already on disk carry the perch `set_home_perch` used to mint. Loading demotes
+    /// it: the record and its anchor stay, the role goes, and the learned choice stops
+    /// narrating a name the room has no colour for.
+    func testLoadDemotesAPerchTheRoomHasNoColourFor() {
+        let defaults = defaults()
+        let store = MapStore(defaults: defaults)
+        store.add(Place(name: "the red perch", position: SIMD3(-1, 0, -1), kind: .perch, elevation: 1))
+        store.add(Place(name: "your perch", position: SIMD3(0, 0, -1), kind: .perch, elevation: 1))
+
+        let reloaded = MapStore(defaults: defaults)
+
+        XCTAssertEqual(reloaded.map.perches.map(\.name), ["the red perch"])
+        let stray = reloaded.map.place(named: "your perch")
+        XCTAssertEqual(stray?.kind, .generic, "kept, with its anchor")
+        XCTAssertEqual(stray?.position, SIMD3(0, 0, -1))
+        XCTAssertNil(PerchMemory.candidates(in: reloaded.map).first { $0.name == "your perch" })
+
+        // One way: the demotion is written back, so a third load sees it already done.
+        XCTAssertEqual(MapStore(defaults: defaults).map.place(named: "your perch")?.kind, .generic)
+    }
 }

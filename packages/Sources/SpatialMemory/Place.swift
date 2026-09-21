@@ -121,6 +121,18 @@ public struct Place: MapRecord {
     public var radius: Float
     public var taughtAt: Date
     public var useCount: Int
+    /// Metres above the anchor point that a character actually stands on. Zero for a place
+    /// on the floor; 1m for a perch on a pole. Held here rather than folded into
+    /// `anchor.position` because the anchor is where the *object* is and the drag gesture,
+    /// the navmesh clamp and the rule regions all want the floor point.
+    ///
+    /// Optional in storage so a map written before elevation existed still decodes; read it
+    /// through `elevation`.
+    private var elevationAboveFloor: Float?
+    /// How many times the user has knocked the bird off this place. The one number the
+    /// perch choice is learned from, so it lives on the record and shows in the inspector
+    /// rather than in a controller's memory.
+    private var knockOffCount: Int?
 
     public init(
         id: UUID = UUID(),
@@ -131,7 +143,9 @@ public struct Place: MapRecord {
         anchorId: UUID? = nil,
         hasRelocalized: Bool = false,
         taughtAt: Date = Date(),
-        useCount: Int = 0
+        useCount: Int = 0,
+        elevation: Float = 0,
+        knockOffs: Int = 0
     ) {
         self.id = id
         self.name = name
@@ -144,7 +158,31 @@ public struct Place: MapRecord {
         )
         self.taughtAt = taughtAt
         self.useCount = useCount
+        elevationAboveFloor = elevation > 0 ? elevation : nil
+        knockOffCount = knockOffs > 0 ? knockOffs : nil
     }
+
+    /// Metres above the floor point that a character stands at here.
+    public var elevation: Float {
+        get { max(0, elevationAboveFloor ?? 0) }
+        set { elevationAboveFloor = newValue > 0 ? newValue : nil }
+    }
+
+    /// Times the bird has been knocked off this place.
+    public var knockOffs: Int {
+        get { max(0, knockOffCount ?? 0) }
+        set { knockOffCount = newValue > 0 ? newValue : nil }
+    }
+
+    /// Where the bird's feet go: the floor point raised by the elevation. Every flight
+    /// target is this, never `position`, so a perch on a 1m pole is stood *on* and not
+    /// stood inside.
+    public var landing: SIMD3<Float> {
+        SIMD3(position.x, position.y + elevation, position.z)
+    }
+
+    /// True when standing here is a flight rather than a walk.
+    public var isElevated: Bool { elevation > 0.05 }
 
     public var position: SIMD3<Float> {
         get { anchor.position }

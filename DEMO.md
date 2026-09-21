@@ -24,13 +24,21 @@ low-poly prop you can see and pinch-drag, not a debug sphere.
 
 | Landmark | Kind | Prop | What it answers |
 |---|---|---|---|
-| perch | `perch` | pole + crossbar | "time to settle down" |
+| red / blue / amber perch | `perch` | pole + crossbar, painted | "time to settle down" |
 | food bowl | `food` | bowl + heaped seed | "you must be hungry" |
 | water dish | `water` | shallow dish | "go get a drink" |
 | petting spot | `comfort` | tufted cushion | "come get some pets" |
 | toy basket | `toy` | basket + ball, bell, ring | "go find yourself a toy" |
 | your desk | `workspace` | desk + monitor | scenery, and the lamp beat |
 | plant | fragile rule | pot + leaves | the constraint the route dodges |
+
+The three perches are identical except for colour, and that is the point: which one he
+settles on is learned from where he has been swatted off, so the colour is the only way to
+say out loud what he chose. Swat him off the red one twice and ask him to settle again.
+
+The three perches are identical records at identical heights and differ only in paint. That
+is deliberate: nothing about them can explain a preference, so when he stops using one the
+only available explanation is memory. See §2b.
 
 The five kinds in the middle column are the demo. `HabitMemory` resolves a **need** against
 `PlaceKind`, never against a name, so the destination for "you must be hungry" comes out of
@@ -55,6 +63,7 @@ never stands in front of the model.
 
 Tap the preset chips; nothing is typed. Each beat reads what the beat before it wrote.
 
+0. **Put up the perches** — one chip places all three, and he takes one.
 1. **Teach where he eats** — "this is where you eat" → the bowl is anchored, he flies to it.
 2. **Ask without naming it** — "you must be hungry" → the utterance contains no landmark.
    He looks up the `food` place, says *"the food bowl — that's where I eat"*, and goes. The
@@ -71,6 +80,30 @@ Tap the preset chips; nothing is typed. Each beat reads what the beat before it 
 Tap the same need twice and the line changes: the second time he says how many times he has
 been there. The count lives on the `Place` record, visible in **What I know**, which is worth
 having open on the projector.
+
+## 2b. The aversion: three perches and a hand (the new bit, 90s)
+
+Tap **Go perch**. He picks one of the three — the red one, first time, because nothing yet
+separates them — flies up onto the crossbar and stands there.
+
+Now knock him off. A hand moving across him at swiping speed, within about 20cm, while he is
+actually standing on a perch. He tumbles off, lands under it, and says so.
+
+Tap **Go perch** again. He names the perch he is *not* using and why, then takes a different
+one. Knock him off that one and the third is next. The counter is `Place.knockOffs`, visible
+on the record in **What I know**, and drawn on the prop itself as a red band per knock — so
+the audience can see the learning without reading a number.
+
+What makes this a memory demo rather than a state machine:
+
+- Nothing in the utterance names a perch. `PerchMemory.best` picks it, out of the map.
+- One knock outweighs any number of successful visits: he does not go back to argue.
+- It survives a relaunch, because the count is on the anchored record.
+- **Forgive the swats** clears the counts without touching the perches, so it re-runs.
+
+Things that deliberately do *not* cost him a perch: a slow hand reaching past him, a fast
+hand that misses, a hand dropping straight down beside the perch. All three are in
+`KnockDetectorTests` — a perch wrongly ruled out is a memory the user never taught.
 
 ## 3. The close: own the memory (45s)
 

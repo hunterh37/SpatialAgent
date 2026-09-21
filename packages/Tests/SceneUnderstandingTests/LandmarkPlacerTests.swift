@@ -54,18 +54,32 @@ final class LandmarkPlacerTests: XCTestCase {
         XCTAssertNotNil(store.map.place(named: "the petting spot"))
     }
 
-    func testTheHomePerchMovesRatherThanMultiplying() async {
+    /// Placing perches no longer stamps a role: three are placed, three survive, and the
+    /// one the bird uses is `PerchMemory`'s answer rather than the last one written.
+    func testAllThreePerchesSurvivePlacement() async {
         let (placer, store) = makePlacer(gaze: true)
-        await placer.place(preset("perch"))
+        for preset in LandmarkPreset.perches { await placer.place(preset) }
+
+        XCTAssertEqual(store.map.places.filter { $0.kind == .perch }.count, 3)
+        XCTAssertEqual(store.map.homePerch?.name, "the red perch")
+        for place in store.map.places where place.kind == .perch {
+            XCTAssertEqual(place.elevation, LandmarkPreset.perchHeight)
+            XCTAssertEqual(place.landing.y, place.position.y + LandmarkPreset.perchHeight)
+        }
+    }
+
+    /// The perch role cannot be taken off a coloured perch by promoting the desk: the three
+    /// presets are the room's perches, and the choice is learned between them.
+    func testPromotingAnotherLandmarkDoesNotUnseatAColouredPerch() async {
+        let (placer, store) = makePlacer(gaze: true)
+        await placer.place(preset("perch-left"))
         let first = try! XCTUnwrap(store.map.homePerch)
 
-        // A second landmark taking the perch role is the user moving it.
         await placer.place(preset("workspace"))
         XCTAssertTrue(store.setHomePerch(id: store.map.place(named: "my desk")!.id))
 
-        XCTAssertEqual(store.map.places.filter { $0.kind == .perch }.count, 1)
-        XCTAssertEqual(store.map.homePerch?.name, "my desk")
-        XCTAssertEqual(store.map.place(id: first.id)?.kind, .generic)
+        XCTAssertEqual(store.map.homePerch?.name, "the red perch")
+        XCTAssertEqual(store.map.place(id: first.id)?.kind, .perch)
     }
 
     func testRePlacingCorrectsInPlace() async {
@@ -88,14 +102,14 @@ final class LandmarkPlacerTests: XCTestCase {
 
     func testNextIsTheFirstUnplacedPreset() async {
         let (placer, _) = makePlacer(gaze: true)
-        XCTAssertEqual(placer.next()?.id, "perch")
-        await placer.place(preset("perch"))
-        XCTAssertEqual(placer.next()?.id, "food-bowl")
+        XCTAssertEqual(placer.next()?.id, "perch-left")
+        await placer.place(preset("perch-left"))
+        XCTAssertEqual(placer.next()?.id, "perch-middle")
     }
 
     func testResetRoomForgetsEverything() async {
         let (placer, store) = makePlacer(gaze: true)
-        await placer.place(preset("perch"))
+        await placer.place(preset("perch-left"))
         await placer.resetRoom()
         XCTAssertTrue(store.map.isEmpty)
     }
@@ -105,9 +119,12 @@ final class LandmarkPlacerTests: XCTestCase {
     func testMarkersAreOnlyThePlacedPresets() async {
         let (placer, _) = makePlacer(gaze: true)
         XCTAssertTrue(placer.markers.isEmpty)
-        await placer.place(preset("perch"))
-        XCTAssertEqual(placer.markers.map(\.id), ["perch"])
-        XCTAssertTrue(placer.markers[0].isHomePerch)
+        await placer.place(preset("perch-left"))
+        XCTAssertEqual(placer.markers.map(\.id), ["perch-left"])
+        XCTAssertTrue(placer.markers[0].isPerch)
+        // The prop is drawn to the record's own height, so a 1m perch is a 1m pole.
+        XCTAssertEqual(placer.markers[0].height, LandmarkPreset.perchHeight)
+        XCTAssertEqual(placer.markers[0].knockOffs, 0)
     }
 
     /// A dragged landmark keeps its identity: the record is moved, not replaced.

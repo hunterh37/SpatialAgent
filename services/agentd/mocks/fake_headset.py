@@ -43,8 +43,8 @@ DEFAULT_GAZE = "the spot in front of you"
 #: One scripted run of the whole memory story, for a demo with no hands free. Ordered so each
 #: line depends on the one before it: teach, act on what was taught, then recall it.
 DEMO_SCRIPT = [
-    "this is your perch",
-    "go to your perch",
+    "this one is yours",
+    "go perch",
     "this is where I do morning standup",
     "remember that I drink oat flat whites",
     "what do you remember about me?",

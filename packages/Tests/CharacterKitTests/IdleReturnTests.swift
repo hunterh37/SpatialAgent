@@ -86,7 +86,7 @@ final class IdleReturnTests: XCTestCase {
             )
         )
 
-        map.upsert(Place(name: "the shelf", position: SIMD3(0, 1, 0), kind: .perch))
+        map.upsert(Place(name: "the red perch", position: SIMD3(0, 1, 0), kind: .perch))
         XCTAssertTrue(
             IdleReturn.shouldReturn(
                 isIdle: true,

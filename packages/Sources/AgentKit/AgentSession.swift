@@ -79,6 +79,10 @@ public final class AgentSession: ObservableObject {
     /// When the character last entered idle. Nil while it is doing anything else.
     private var idleSince: Date?
     private var directiveSink: ((ResolvedDirective) -> Void)?
+    /// Flying onto a perch is not a `ResolvedDirective`: a directive is a path across the
+    /// floor, and this is a 1m climb the navmesh has no opinion about. Its own sink rather
+    /// than a new directive kind, so nothing on the walking path has to learn about height.
+    private var perchSink: ((Place) -> Void)?
     /// Affinity inputs, routed to the body. The session knows what happened; the entity owns
     /// how it feels about it.
     private var characterMood: ((Mood.Input) -> Void)?
@@ -112,11 +116,13 @@ public final class AgentSession: ObservableObject {
     public func bindCharacter(
         onDirective: @escaping (ResolvedDirective) -> Void,
         onSignal: @escaping (CharacterEvent) -> Void,
-        onMood: ((Mood.Input) -> Void)? = nil
+        onMood: ((Mood.Input) -> Void)? = nil,
+        onPerch: ((Place) -> Void)? = nil
     ) {
         directiveSink = onDirective
         signalSink = onSignal
         characterMood = onMood
+        perchSink = onPerch
     }
 
     /// Attaches gaze capture so teaching acts have somewhere to land.
@@ -605,6 +611,44 @@ public final class AgentSession: ObservableObject {
         characterState = next
     }
 
+    // MARK: Perches
+
+    /// "Go perch." Picks a perch, says why, and flies him to it.
+    ///
+    /// The choice is `PerchMemory`'s, made from the knock-off counts on the records, so
+    /// tapping this repeatedly is the learning demo: swat him off the one he picks and the
+    /// next tap picks a different one, with the reason spoken out loud.
+    @discardableResult
+    public func goPerch() -> PerchMemory.Choice {
+        let choice = places.perch()
+        speakInCharacter(choice.line)
+        guard let place = choice.place else {
+            apply(CharacterDirective(kind: .lookAt, target: .user))
+            apply(CharacterDirective(kind: .emote, emotion: .concerned))
+            return choice
+        }
+        perchSink?(place)
+        return choice
+    }
+
+    /// A hand swatted him off. Writes the aversion, then says it.
+    ///
+    /// Called by the render layer, which is the only place that sees hands, but the memory
+    /// write and the line both live here so a knock is one event in the transcript and one
+    /// increment on the record — never two code paths that can drift.
+    @discardableResult
+    public func notePerchKnockOff(placeId: UUID) -> Int? {
+        guard let total = places.knockOff(placeId: placeId) else { return nil }
+        let name = places.map.places.first { $0.id == placeId }?.name ?? "that perch"
+        characterMood?(.knockedOff)
+        speakInCharacter(
+            total == 1
+                ? "Hey! Okay — not \(name), then."
+                : "\(name) again? Fine. I'll remember."
+        )
+        return total
+    }
+
     // MARK: Presence
 
     /// Drives the return-to-perch policy. Called from the render loop, which is the only
@@ -618,6 +662,17 @@ public final class AgentSession: ObservableObject {
             characterPosition: characterPosition,
             perch: perch.position
         ) else { return }
+        // An elevated perch is flown to, not walked to: there is no navmesh at 1m, and a
+        // bird that walks to the foot of its own pole and stands there has not gone home.
+        if perch.isElevated {
+            self.idleSince = nil
+            places.mutate { $0.noteUse(placeId: perch.id) }
+            places.record(
+                Episode(placeId: perch.id, kind: .visited, summary: "settled on \(perch.name)")
+            )
+            perchSink?(perch)
+            return
+        }
         guard let path = scene?.navMesh?.path(from: characterPosition, to: perch.position) else {
             // No route home is not worth retrying every frame; the next conversation
             // restarts the clock.

@@ -89,9 +89,11 @@ def memory_tools() -> list[Tool]:
         Tool(
             name=SET_PERCH,
             description=(
-                "The user told you where you should wait or sit, e.g. 'this is your perch' "
-                "or 'wait on the shelf'. Pass the place name if they said one; otherwise "
-                "leave it out and the headset uses what they are looking at."
+                "The user pointed out one of your perches, e.g. 'this one is yours' or "
+                "'wait on the red perch'. Pass the place name if they said one; otherwise "
+                "leave it out and the headset uses what they are looking at. The room has "
+                "three perches and they are named by colour; never invent another name for "
+                "one."
             ),
             safety="safe",
             parameters={"place": {"type": "string"}},

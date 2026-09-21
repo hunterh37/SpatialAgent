@@ -11,7 +11,7 @@ final class HabitMemoryTests: XCTestCase {
         map.upsert(Place(name: "the water dish", position: SIMD3(2, 0, 0), kind: .water))
         map.upsert(Place(name: "the petting spot", position: SIMD3(0, 0, 1), kind: .comfort))
         map.upsert(Place(name: "the toy basket", position: SIMD3(-1, 0, 0), kind: .toy))
-        map.upsert(Place(name: "your perch", position: SIMD3(0, 1, -1), kind: .perch))
+        map.upsert(Place(name: "the red perch", position: SIMD3(0, 1, -1), kind: .perch))
         return map
     }
 
@@ -21,7 +21,7 @@ final class HabitMemoryTests: XCTestCase {
         XCTAssertEqual(HabitMemory.place(for: .thirsty, in: map)?.name, "the water dish")
         XCTAssertEqual(HabitMemory.place(for: .lonely, in: map)?.name, "the petting spot")
         XCTAssertEqual(HabitMemory.place(for: .bored, in: map)?.name, "the toy basket")
-        XCTAssertEqual(HabitMemory.place(for: .sleepy, in: map)?.name, "your perch")
+        XCTAssertEqual(HabitMemory.place(for: .sleepy, in: map)?.name, "the red perch")
     }
 
     /// The whole point: an empty map answers with a question, not with a flight to whatever

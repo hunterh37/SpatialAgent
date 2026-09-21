@@ -105,8 +105,10 @@ def build_system_prompt(
     perches = [p.name for p in scene.places if p.kind == "perch"]
     if perches:
         parts.append(
-            f"Your perch is the {perches[0]}. Go there when you are told to wait, when the "
-            f"user is busy, or when you have nothing to do."
+            "Your perches are: " + ", ".join(perches) + ". Go to one when you are told to "
+            "wait, when the user is busy, or when you have nothing to do. Which one is the "
+            "headset's decision, not yours — it knows which ones you have been swatted off "
+            "— so say 'a perch' rather than picking one by name unless the user named it."
         )
 
     if scene.userPlace:

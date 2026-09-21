@@ -21,6 +21,10 @@ struct ImmersiveView: View {
     /// Hand tracking runs its own ARKit session; the scene provider's session owns world and
     /// plane data and has a different lifetime (it survives leaving the immersive space).
     @State private var hands = HandTrackingSession()
+    /// Swipes that knock the bird off a perch. Separate from the palm gate on purpose: an
+    /// open palm held still is an invitation and a hand moving fast through him is the
+    /// opposite, and one debouncer cannot serve both.
+    @State private var knocks = KnockDetector()
     /// The grabbable low-poly landmark props, and which one a pinch currently owns.
     @State private var markers = LandmarkMarkers()
     @State private var dragging: String?
@@ -47,7 +51,13 @@ struct ImmersiveView: View {
             session.bindCharacter(
                 onDirective: { character.apply($0) },
                 onSignal: { character.signal($0) },
-                onMood: { character.note($0) }
+                onMood: { character.note($0) },
+                // Flying onto a perch is a climb, not a path: the landing point is the
+                // record's, raised by its own elevation, so a perch that is dragged higher
+                // is flown to higher with nothing else changing.
+                onPerch: { place in
+                    character.flyToPerch(landing: place.landing, placeId: place.id)
+                }
             )
 
             // Palm debug marker: green where an offered palm was detected, which is also
@@ -90,6 +100,22 @@ struct ImmersiveView: View {
                     palmMarker.isEnabled = false
                 }
                 character.offerPalm(palm)
+
+                // The swat. Only while he is actually standing on a perch, so a hand waved
+                // across an empty room costs nothing, and the memory write happens in the
+                // session rather than here — this layer only reports that a hand arrived.
+                if character.isPerchedOnObject, let placeId = character.perchedPlaceId {
+                    if let strike = knocks.update(
+                        deltaTime: delta,
+                        hands: hands.handPoints,
+                        target: character.position
+                    ) {
+                        character.knockOffPerch(force: strike.force, direction: strike.direction)
+                        session.notePerchKnockOff(placeId: placeId)
+                    }
+                } else {
+                    knocks.reset()
+                }
 
                 character.update(deltaTime: delta, userPosition: model.scene.userPosition)
                 session.characterPosition = character.position

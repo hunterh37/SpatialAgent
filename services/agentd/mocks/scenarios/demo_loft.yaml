@@ -7,13 +7,21 @@ scene:
   floorArea: 38.0
   userPosition: { x: 0.0, y: 0.0, z: 0.0 }
   places:
-    # kind: perch is the landmark that changes behaviour rather than just naming a spot —
-    # it is where the bird waits, and it is the first thing the memory demo shows surviving
-    # a restart.
-    - name: bookshelf perch
+    # The three perches, named by colour exactly as the headset's presets name them. They
+    # are interchangeable to the model; which one the bird uses is the headset's learned
+    # choice, so the server is told all three and picks none.
+    - name: the red perch
       kind: perch
-      position: { x: -2.2, y: 1.3, z: -1.1 }
-      radius: 0.35
+      position: { x: -2.2, y: 1.0, z: -1.1 }
+      radius: 0.3
+    - name: the blue perch
+      kind: perch
+      position: { x: -1.4, y: 1.0, z: -1.4 }
+      radius: 0.3
+    - name: the amber perch
+      kind: perch
+      position: { x: -0.5, y: 1.0, z: -1.5 }
+      radius: 0.3
     - name: desk
       kind: workspace
       position: { x: -1.6, y: 0.0, z: -2.2 }
@@ -47,8 +55,8 @@ scene:
       place: couch
     - kind: perch
       severity: soft
-      name: bookshelf perch
-      place: bookshelf perch
+      name: the red perch
+      place: the red perch
   activities:
     - name: morning standup
       place: desk

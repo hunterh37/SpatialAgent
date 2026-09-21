@@ -5,8 +5,11 @@ import XCTest
 
 /// The demo script is data, and the guarantee is that every chip sends a real utterance.
 final class DemoScenariosTests: XCTestCase {
-    func testGroupsAreTheFourActsOfTheDemo() {
-        XCTAssertEqual(DemoScenarios.all.map(\.title), ["Teach", "Needs", "Recall", "Act"])
+    func testGroupsAreTheActsOfTheDemo() {
+        XCTAssertEqual(
+            DemoScenarios.all.map(\.title),
+            ["Teach", "Needs", "Perches", "Recall", "Act"]
+        )
     }
 
     func testEveryPromptSendsSomething() {
@@ -77,21 +80,46 @@ final class DemoScriptTests: XCTestCase {
                 )
             }
             XCTAssertTrue(
-                prompt.script.contains { if case .satisfy = $0 { return true }; return false },
+                prompt.script.contains {
+                    switch $0 {
+                    case .satisfy, .perch: return true
+                    default: return false
+                    }
+                },
                 "\(prompt.label) has no need to resolve"
             )
         }
     }
 
     /// Every need has a chip, so nothing in `HabitMemory` is unreachable from the stage.
+    /// Sleep is reached through `.perch` rather than `.satisfy`, because the perch beat is a
+    /// choice between three equals rather than a lookup with one answer.
     func testEveryNeedIsReachableFromAChip() {
         var covered: Set<Need> = []
         for prompt in DemoScenarios.allPrompts {
             for action in prompt.script {
-                if case let .satisfy(need) = action { covered.insert(need) }
+                switch action {
+                case let .satisfy(need): covered.insert(need)
+                case .perch: covered.insert(.sleepy)
+                default: break
+                }
             }
         }
         XCTAssertEqual(covered, Set(Need.allCases))
+    }
+
+    /// The perch group is the aversion demo, and it only works if "go perch" can be tapped
+    /// again and again: the answer is supposed to change between taps.
+    func testGoPerchIsRepeatableAndNamesNoPerch() {
+        let goPerch = DemoScenarios.perches.prompts[0]
+        XCTAssertTrue(goPerch.repeatable)
+        XCTAssertTrue(goPerch.movesTheBird)
+        for preset in LandmarkPreset.perches {
+            XCTAssertFalse(
+                goPerch.utterance.lowercased().contains(preset.name.lowercased()),
+                "the chip names \(preset.name); the memory should be choosing"
+            )
+        }
     }
 
     /// The run of show has to teach before it asks: a need beat that plays before the

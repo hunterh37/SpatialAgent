@@ -29,6 +29,14 @@ public enum DemoAction: Hashable, Sendable {
     case inventory
     /// Picks the need itself, then satisfies it. No landmark and no need in the utterance.
     case decide
+    /// The beat that is a *learned* choice rather than a lookup: pick one of three identical
+    /// perches, say why that one, and fly up onto it. Tap it repeatedly and knock him off
+    /// between taps and the answer moves — which is the only way an audience can tell
+    /// learning from a lookup table.
+    case perch
+    /// Clears the knock-off counts without touching the perches. "Forgive me", on a chip,
+    /// so the learning demo can be run twice in one session.
+    case forgetKnockOffs
 }
 
 public extension DemoAction {
@@ -71,6 +79,9 @@ public struct DemoPrompt: Identifiable, Hashable, Sendable {
     public let utterance: String
     /// Offline replay. Empty means the chip is talk-only and needs a server to do anything.
     public let script: [DemoAction]
+    /// True when tapping the chip again is the point rather than a mistake. "Go perch" is
+    /// the only one: the answer is supposed to change between taps.
+    public let repeatable: Bool
 
     public var id: String { utterance }
 
@@ -81,15 +92,23 @@ public struct DemoPrompt: Identifiable, Hashable, Sendable {
                 return directive.kind == .walkTo || directive.kind == .lookAt
                     || directive.kind == .point
             }
-            if case .teach = $0 { return true }
-            return false
+            switch $0 {
+            case .teach, .satisfy, .decide, .perch: return true
+            default: return false
+            }
         }
     }
 
-    public init(label: String, utterance: String? = nil, script: [DemoAction] = []) {
+    public init(
+        label: String,
+        utterance: String? = nil,
+        script: [DemoAction] = [],
+        repeatable: Bool = false
+    ) {
         self.label = label
         self.utterance = utterance ?? label
         self.script = script
+        self.repeatable = repeatable
     }
 }
 
@@ -112,7 +131,11 @@ public enum DemoScenarios {
     /// Landmark names, spelled once. Every script target has to be a name the room actually
     /// holds, or the resolver answers with a question instead of a flight.
     public enum Landmark {
-        public static let perch = "your perch"
+        // Perches are named by colour: the three are behaviourally identical, so the only
+        // way to say which one the bird chose is to say what colour it is.
+        public static let redPerch = "the red perch"
+        public static let bluePerch = "the blue perch"
+        public static let amberPerch = "the amber perch"
         public static let desk = "my desk"
         public static let food = "the food bowl"
         public static let water = "the water dish"
@@ -129,17 +152,19 @@ public enum DemoScenarios {
         symbol: "graduationcap.fill",
         prompts: [
             DemoPrompt(
-                label: "This is your perch",
+                label: "These are your perches",
+                utterance: "These three are yours",
                 script: [
                     .lookAtUser,
-                    .teach(preset: "perch"),
-                    .say("Mine? Okay — your perch it is."),
-                    .look(at: Landmark.perch),
+                    .teach(preset: "perch-left"),
+                    .teach(preset: "perch-middle"),
+                    .teach(preset: "perch-right"),
+                    .say("Three of them. Red, blue, amber — I'll work out which one I like."),
+                    .look(at: Landmark.bluePerch),
                     .pause(0.5),
-                    .walk(to: Landmark.perch),
+                    .perch,
                     .pause(2.2),
                     .emote(.happy),
-                    .gesture,
                 ]
             ),
             DemoPrompt(
@@ -240,7 +265,42 @@ public enum DemoScenarios {
             DemoPrompt(
                 label: "Go settle down",
                 utterance: "Time to settle down",
+                // `.satisfy(.sleepy)` rather than a bare `.perch`: settling has to go
+                // through the need, or the chip flies him to a perch without the habit
+                // memory ever being asked which one — which is the thing being demoed.
                 script: [.emote(.thinking), .satisfy(.sleepy)]
+            ),
+        ]
+    )
+
+    /// Act two and a half: the aversion. Three perches, nothing to choose between them but
+    /// what has happened to him on each, so this group is the only one in the demo whose
+    /// answer the *audience* changes — with their hand, mid-run.
+    public static let perches = DemoScenarioGroup(
+        title: "Perches",
+        symbol: "bird.fill",
+        prompts: [
+            DemoPrompt(
+                label: "Go perch",
+                utterance: "Go perch",
+                script: [.lookAtUser, .emote(.thinking), .pause(0.3), .perch],
+                repeatable: true
+            ),
+            DemoPrompt(
+                label: "Which perches do you avoid?",
+                utterance: "Why won't you sit there?",
+                script: [.lookAtUser, .emote(.thinking), .pause(0.4), .inventory]
+            ),
+            DemoPrompt(
+                label: "Forgive the swats",
+                utterance: "Forget about that — try them all again",
+                script: [
+                    .forgetKnockOffs,
+                    .say("...fine. Clean slate."),
+                    .emote(.happy),
+                    .pause(0.4),
+                    .perch,
+                ]
             ),
         ]
     )
@@ -303,7 +363,7 @@ public enum DemoScenarios {
         ]
     )
 
-    public static let all: [DemoScenarioGroup] = [teach, needs, recall, act]
+    public static let all: [DemoScenarioGroup] = [teach, needs, perches, recall, act]
 
     /// Every utterance, flattened. Used by tests to assert the list stays sendable.
     public static var allPrompts: [DemoPrompt] { all.flatMap(\.prompts) }

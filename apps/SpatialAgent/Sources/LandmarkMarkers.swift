@@ -20,6 +20,26 @@ final class LandmarkMarkers {
     private var markers: [String: Entity] = [:]
     /// The prop style currently drawn, so a style change rebuilds and a move does not.
     private var styles: [String: PropStyle] = [:]
+    /// The shape inputs the prop was built from. A perch's height and its knock-off bands
+    /// are geometry, so a change to either has to rebuild the prop the same way a style
+    /// change does — otherwise the bird starts avoiding a perch that still looks pristine.
+    private var shapes: [String: ShapeKey] = [:]
+
+    private struct ShapeKey: Equatable {
+        var style: PropStyle
+        var height: Float
+        var knockOffs: Int
+        /// Paint is part of the build rather than a material swap: the prop is an assembly
+        /// of primitives with per-part colours, so recolouring it is rebuilding it.
+        var tint: PropTint
+
+        init(_ marker: LandmarkPlacer.Marker) {
+            style = marker.prop
+            height = marker.height
+            knockOffs = marker.knockOffs
+            tint = marker.tint
+        }
+    }
 
     /// Mirrors the map onto the scene: adds new props, moves existing ones, drops removed.
     func sync(to markers: [LandmarkPlacer.Marker], dragging: String?) {
@@ -28,10 +48,11 @@ final class LandmarkMarkers {
             entity.removeFromParent()
             self.markers.removeValue(forKey: id)
             styles.removeValue(forKey: id)
+            shapes.removeValue(forKey: id)
         }
         for marker in markers {
             let entity = self.markers[marker.id] ?? make(marker)
-            if styles[marker.id] != marker.prop { rebuildProp(on: entity, marker: marker) }
+            if shapes[marker.id] != ShapeKey(marker) { rebuildProp(on: entity, marker: marker) }
             // A marker under the finger is driven by the gesture, not by the record it is
             // about to overwrite — otherwise it snaps back on every frame of the drag.
             if marker.id != dragging { entity.position = marker.position }
@@ -71,13 +92,23 @@ final class LandmarkMarkers {
     /// would make them eight things to miss at arm's length.
     private func rebuildProp(on entity: Entity, marker: LandmarkPlacer.Marker) {
         for child in entity.children { child.removeFromParent() }
-        entity.addChild(LandmarkProp.make(marker.prop))
+        entity.addChild(
+            LandmarkProp.make(
+                marker.prop,
+                height: marker.height,
+                knockOffs: marker.knockOffs,
+                tint: marker.tint
+            )
+        )
         let radius = LandmarkProp.grabRadius(for: marker.prop)
         entity.components.set(CollisionComponent(shapes: [
             // Offset upward: props sit on the floor, so a sphere centred on the origin is
-            // half underneath it.
-            .generateSphere(radius: radius).offsetBy(translation: SIMD3(0, radius * 0.7, 0)),
+            // half underneath it. For an elevated prop the grabbable part is the top — you
+            // move a perch by its bar, not by the foot of its pole.
+            .generateSphere(radius: radius)
+                .offsetBy(translation: SIMD3(0, max(radius * 0.7, marker.height), 0)),
         ]))
         styles[marker.id] = marker.prop
+        shapes[marker.id] = ShapeKey(marker)
     }
 }

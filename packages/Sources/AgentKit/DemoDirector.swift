@@ -168,6 +168,18 @@ public final class DemoDirector {
             session.speakLocally(session.places.inventory)
             await sleep(3.0)
 
+        case .perch:
+            // No `satisfy` here: a need resolves to the one place that answers it, and a
+            // perch is a choice between three that all do. The line and the flight both
+            // come from `AgentSession.goPerch`, which is also what a server directive
+            // would drive, so the scripted and live paths stay one path.
+            let choice = session.goPerch()
+            await sleep(min(3.4, 1.1 + Double(choice.line.count) / 28.0))
+            if choice.canAct { await sleep(1.2) }
+
+        case .forgetKnockOffs:
+            session.places.forgetKnockOffs()
+
         case .decide:
             guard let need = HabitMemory.strongestNeed(in: session.places.map) else {
                 session.speakLocally(

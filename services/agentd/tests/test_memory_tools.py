@@ -106,7 +106,16 @@ def test_the_profile_reaches_the_prompt(tmp_path):
     assert "Pixel" in sess._messages()[0]["content"]
 
 
-def test_a_perch_place_is_named_in_the_prompt(tmp_path):
+def test_every_perch_is_named_in_the_prompt(tmp_path):
+    """All three, and no instruction to pick one: the headset owns that choice."""
     sess = session(tmp_path)
-    sess.update_scene(SceneSnapshot(places=[MapPlace(name="bookshelf", kind="perch")]))
-    assert "Your perch is the bookshelf" in sess._messages()[0]["content"]
+    sess.update_scene(
+        SceneSnapshot(
+            places=[
+                MapPlace(name="the red perch", kind="perch"),
+                MapPlace(name="the blue perch", kind="perch"),
+            ]
+        )
+    )
+    prompt = sess._messages()[0]["content"]
+    assert "Your perches are: the red perch, the blue perch" in prompt

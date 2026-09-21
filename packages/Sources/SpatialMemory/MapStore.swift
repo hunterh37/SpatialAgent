@@ -98,9 +98,29 @@ public final class MapStore: ObservableObject {
         if let data = defaults.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode(SemanticMap.self, from: data) {
             map = decoded
+            demoteUncolouredPerches()
             return
         }
         migrateLegacyPlaces()
+    }
+
+    /// One-way cleanup for rooms already on disk: a perch whose name is not one of the three
+    /// coloured presets stops being a perch.
+    ///
+    /// `set_home_perch` used to mint its own record called "your perch", and that record then
+    /// won the learned choice and got read out — "your perch. Still the good one." Three
+    /// named perches is the product's contract; a fourth unnamed one makes the line
+    /// unreadable. The record and its anchor are kept, because the user did teach a spot;
+    /// only the role goes.
+    private func demoteUncolouredPerches() {
+        var demoted = false
+        for index in map.places.indices
+            where map.places[index].kind == .perch
+            && !LandmarkPreset.isPerchName(map.places[index].name) {
+            map.places[index].kind = .generic
+            demoted = true
+        }
+        if demoted { persist() }
     }
 
     /// One-way migration out of `NamedPlaceStore`'s array of places.

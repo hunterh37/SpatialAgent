@@ -160,50 +160,76 @@ public final class TeachingResolver {
 
     // MARK: - Perch
 
-    /// "this is your perch". Either promotes a place the user already named or writes a new
-    /// one where they are looking; either way the map is left with exactly one perch, because
-    /// the idle-return policy resolves against `homePerch` and a second one is an ambiguous
-    /// home rather than a richer map.
+    /// How near the gaze point has to be to an existing perch for "this is your perch" to
+    /// mean that one. Generous, because the user is looking at a pole from across a room.
+    private static let perchBindRadius: Float = 0.75
+
+    /// "this is your perch".
+    ///
+    /// This act never invents a name. The room's perches are the three coloured presets and
+    /// the learned-choice line says one of those names out loud, so a record called
+    /// anything else is a perch the audience cannot see referred to. In order: the perch the
+    /// user is looking at, then the next coloured preset that has not been placed yet, and
+    /// only when all three are down does the looked-at place get promoted under its own name.
     private func perch(named requested: String?) async -> TeachingOutcome {
         let wanted = (requested ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
         if !wanted.isEmpty, let existing = store.map.place(named: wanted) {
-            store.setHomePerch(id: existing.id)
-            gaze.endAct()
-            mostRecentReferent = existing.id
-            store.record(
-                Episode(
-                    placeId: existing.id,
-                    kind: .taught,
-                    summary: "\(TeachingAct.setHomePerch.rawValue): \(existing.name)"
-                )
-            )
-            return .corrected(.setHomePerch, name: existing.name, id: existing.id)
+            return bind(to: existing)
         }
 
         guard let target = gaze.target() else { return .needsGaze }
+
+        // Looking at a perch is a reference to it, not a request for another one.
+        let near = store.map.perches
+            .filter { simd_distance($0.position, target.point) <= max($0.radius, Self.perchBindRadius) }
+            .min { simd_distance($0.position, target.point) < simd_distance($1.position, target.point) }
+        if let near {
+            return bind(to: near)
+        }
+
         let anchorId = await anchors?.anchor(at: target.point)
         let relocalized = anchors?.hasRelocalized(anchorId) ?? true
-        // The demo preset uses this name, so an untitled perch answers to the same phrase
-        // the recall prompts already ask about.
-        let label = wanted.isEmpty ? "your perch" : wanted
-        let outcome = store.add(
-            Place(
-                name: label,
-                position: target.point,
-                radius: target.radius,
-                kind: .perch,
-                anchorId: anchorId,
-                hasRelocalized: relocalized
+
+        // Adopting the next unplaced preset gives the new perch a colour the user can say
+        // and the prop the checklist would have drawn: name, height and tint all come from
+        // `LandmarkPreset`, and the placer keys the prop off the name.
+        if let preset = LandmarkPreset.perches.first(where: { store.map.place(named: $0.name) == nil }) {
+            let outcome = store.add(
+                Place(
+                    name: preset.name,
+                    position: target.point,
+                    radius: target.radius,
+                    kind: preset.kind,
+                    anchorId: anchorId,
+                    hasRelocalized: relocalized,
+                    elevation: preset.height
+                )
+            )
+            return finish(.setHomePerch, name: preset.name, outcome: outcome)
+        }
+
+        // All three colours are down, so this is the user calling something else a perch.
+        // The record keeps the name they taught it; nothing new is named here either.
+        guard let existing = store.map.containingPlace(of: target.point) else {
+            return .failed("all three perches are already placed")
+        }
+        return bind(to: existing)
+    }
+
+    /// Promotes an existing record to a perch and reports it. No rename, ever.
+    private func bind(to place: Place) -> TeachingOutcome {
+        store.setHomePerch(id: place.id)
+        gaze.endAct()
+        mostRecentReferent = place.id
+        store.record(
+            Episode(
+                placeId: place.id,
+                kind: .taught,
+                summary: "\(TeachingAct.setHomePerch.rawValue): \(place.name)"
             )
         )
-        switch outcome {
-        case let .created(id), let .corrected(id):
-            // Runs even for a fresh place: the demotion of whatever was the perch before is
-            // the half of "set" that `upsert` cannot know about.
-            store.setHomePerch(id: id)
-        }
-        return finish(.setHomePerch, name: label, outcome: outcome)
+        return .corrected(.setHomePerch, name: place.name, id: place.id)
     }
 
     /// Resolves a disambiguation the user answered with "nest it inside".

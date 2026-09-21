@@ -30,13 +30,28 @@ enum LandmarkProp {
         static let terracotta = UIColor(red: 0.78, green: 0.40, blue: 0.26, alpha: 1)
         static let slate = UIColor(red: 0.36, green: 0.40, blue: 0.47, alpha: 1)
         static let marker = UIColor(red: 0.35, green: 0.62, blue: 0.95, alpha: 1)
+        /// The knock-off band. Red, because it is the one thing in the room that means "no".
+        static let warning = UIColor(red: 0.88, green: 0.26, blue: 0.24, alpha: 1)
     }
 
     /// Builds the prop for a landmark, origin at the floor, +Y up.
-    static func make(_ style: PropStyle) -> Entity {
+    ///
+    /// `height` is the perch's crossbar height; ignored by every other style. `knockOffs` is
+    /// how many times the bird has been swatted off this one, drawn as a red band on the
+    /// pole so the learned aversion is legible in the room itself — the inspector has the
+    /// number, but nobody watching a demo is reading the inspector.
+    /// `tint` paints the perch. Every other prop has a palette of its own — a blue food
+    /// bowl would say nothing, while a blue perch is how the user refers to one of three
+    /// otherwise identical poles.
+    static func make(
+        _ style: PropStyle,
+        height: Float = 0,
+        knockOffs: Int = 0,
+        tint: PropTint = .wood
+    ) -> Entity {
         let root = Entity()
         switch style {
-        case .perch: buildPerch(into: root)
+        case .perch: buildPerch(into: root, height: height, knockOffs: knockOffs, tint: tint)
         case .foodBowl: buildBowl(into: root, contents: Paint.seed, heaped: true)
         case .waterDish: buildBowl(into: root, contents: Paint.water, heaped: false)
         case .cushion: buildCushion(into: root)
@@ -53,7 +68,8 @@ enum LandmarkProp {
     static func grabRadius(for style: PropStyle) -> Float {
         switch style {
         case .desk: return 0.26
-        case .perch, .toyBasket, .plant: return 0.18
+        case .perch: return 0.22
+        case .toyBasket, .plant: return 0.18
         default: return 0.14
         }
     }
@@ -62,14 +78,41 @@ enum LandmarkProp {
 
     /// Base disc, pole, crossbar. The silhouette is the whole point: it should read as a
     /// perch from across the room, because it is where the bird goes when nobody is talking.
-    private static func buildPerch(into root: Entity) {
-        root.addChild(cylinder(radius: 0.09, height: 0.02, color: Paint.woodDark, y: 0.01))
-        root.addChild(cylinder(radius: 0.012, height: 0.30, color: Paint.wood, y: 0.16))
-        let bar = box(size: SIMD3(0.26, 0.016, 0.016), color: Paint.wood, y: 0.31)
-        root.addChild(bar)
+    private static func buildPerch(
+        into root: Entity,
+        height: Float,
+        knockOffs: Int,
+        tint: PropTint
+    ) {
+        let paint = color(tint)
+        let paintDark = color(tint.shaded())
+        // A perch the bird flies up to rather than hops onto: the bar goes where the map
+        // says it is, and the pole is however long that takes. A prop with a hard-coded
+        // 31cm pole and a bar drawn at 1m is a bar floating in the air.
+        let bar = max(0.18, height)
+        let base = max(0.09, bar * 0.13)
+        root.addChild(cylinder(radius: base, height: 0.02, color: paintDark, y: 0.01))
+        root.addChild(
+            cylinder(radius: 0.014, height: bar - 0.02, color: paint, y: (bar - 0.02) / 2 + 0.02)
+        )
+        // The bar is the part the bird actually stands on, so it carries the full-strength
+        // colour: that is what is visible at head height from across the room.
+        root.addChild(box(size: SIMD3(0.26, 0.018, 0.018), color: paint, y: bar))
         // Two end caps, so the crossbar has ends rather than just stopping.
         for x in [Float(-0.13), 0.13] {
-            root.addChild(sphere(radius: 0.014, color: Paint.woodDark, at: SIMD3(x, 0.31, 0)))
+            root.addChild(sphere(radius: 0.015, color: paintDark, at: SIMD3(x, bar, 0)))
+        }
+        // One band per knock-off, stacked under the bar. Three bands and the audience knows
+        // why he stopped landing there without anyone narrating it.
+        for index in 0 ..< min(knockOffs, 4) {
+            root.addChild(
+                cylinder(
+                    radius: 0.021,
+                    height: 0.016,
+                    color: Paint.warning,
+                    y: bar - 0.05 - Float(index) * 0.026
+                )
+            )
         }
     }
 
@@ -189,6 +232,17 @@ enum LandmarkProp {
     }
 
     // MARK: - Primitives
+
+    /// `PropTint` is UIKit-free so it can live in SpatialMemory and be tested off-device;
+    /// this is the one place it becomes a colour.
+    private static func color(_ tint: PropTint) -> UIColor {
+        UIColor(
+            red: CGFloat(tint.red),
+            green: CGFloat(tint.green),
+            blue: CGFloat(tint.blue),
+            alpha: 1
+        )
+    }
 
     private static func matte(_ color: UIColor) -> SimpleMaterial {
         SimpleMaterial(color: color, roughness: 0.85, isMetallic: false)
