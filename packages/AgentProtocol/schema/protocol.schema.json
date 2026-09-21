@@ -4,176 +4,669 @@
   "title": "SpatialAgent wire protocol",
   "description": "Source of truth. Swift and Python types are generated from this file.",
   "definitions": {
-    "ProtocolVersion": { "const": 1 },
-
-    "Vec3": {
+    "ProtocolVersion": {
+      "const": 1
+    },
+    "MapPlace": {
+      "description": "A taught place, by name only. Coordinates never leave the client (spec/07-memory.md).",
       "type": "object",
-      "required": ["x", "y", "z"],
+      "required": [
+        "name",
+        "kind"
+      ],
       "properties": {
-        "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" }
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "generic",
+            "workspace",
+            "surface",
+            "floor",
+            "perch"
+          ]
+        },
+        "navigable": {
+          "type": "boolean",
+          "description": "False when the anchor has not relocalized; the bird can name it but not walk to it."
+        }
       }
     },
-
-    "NamedPlace": {
+    "MapObjectRef": {
       "type": "object",
-      "required": ["name", "position", "radius"],
+      "required": [
+        "name"
+      ],
       "properties": {
-        "name": { "type": "string" },
-        "position": { "$ref": "#/definitions/Vec3" },
-        "radius": { "type": "number", "minimum": 0.1 }
+        "name": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "place": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Name of the containing place, if any."
+        }
       }
     },
-
+    "MapRuleRef": {
+      "type": "object",
+      "required": [
+        "kind",
+        "severity"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "forbidden",
+            "quiet",
+            "perch",
+            "fragile"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "hard",
+            "soft"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "place": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "MapActivityRef": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "place": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
     "SceneSnapshot": {
+      "description": "The abstracted map: names, kinds and coarse relationships. No coordinates, no camera frames, no reconstructions (spec/07-memory.md Enforcement).",
       "type": "object",
-      "required": ["places"],
+      "required": [
+        "places"
+      ],
       "properties": {
-        "places": { "type": "array", "items": { "$ref": "#/definitions/NamedPlace" } },
-        "floorArea": { "type": "number" },
-        "userPosition": { "$ref": "#/definitions/Vec3" }
+        "places": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MapPlace"
+          }
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MapObjectRef"
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MapRuleRef"
+          }
+        },
+        "activities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MapActivityRef"
+          }
+        },
+        "userPlace": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Name of the place the user is currently inside, if any."
+        },
+        "floorArea": {
+          "type": "number"
+        }
       }
     },
-
     "DeviceKind": {
-      "enum": ["light", "lock", "thermostat", "cover", "sensor", "scene", "media", "other"]
+      "enum": [
+        "light",
+        "lock",
+        "thermostat",
+        "cover",
+        "sensor",
+        "scene",
+        "media",
+        "other"
+      ]
     },
-
     "Device": {
       "type": "object",
-      "required": ["id", "name", "kind"],
+      "required": [
+        "id",
+        "name",
+        "kind"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "room": { "type": ["string", "null"] },
-        "kind": { "$ref": "#/definitions/DeviceKind" },
-        "state": { "type": "object", "additionalProperties": true },
-        "capabilities": { "type": "array", "items": { "type": "string" } }
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "room": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/definitions/DeviceKind"
+        },
+        "state": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
-
-    "Safety": { "enum": ["safe", "unsafe"] },
-
-    "DirectiveKind": {
-      "enum": ["walkTo", "lookAt", "point", "emote", "gesture", "idle"]
+    "Safety": {
+      "enum": [
+        "safe",
+        "unsafe"
+      ]
     },
-
+    "DirectiveKind": {
+      "enum": [
+        "walkTo",
+        "lookAt",
+        "point",
+        "emote",
+        "gesture",
+        "idle"
+      ]
+    },
     "CharacterDirective": {
       "description": "Symbolic intent only. Never animation names, never raw coordinates.",
       "type": "object",
-      "required": ["kind"],
+      "required": [
+        "kind"
+      ],
       "properties": {
-        "kind": { "$ref": "#/definitions/DirectiveKind" },
-        "place": { "type": ["string", "null"], "description": "Named place from SceneSnapshot" },
-        "target": { "enum": ["user", "place", "device", null] },
-        "deviceId": { "type": ["string", "null"] },
-        "emotion": { "enum": ["neutral", "confused", "happy", "concerned", "thinking", null] }
+        "kind": {
+          "$ref": "#/definitions/DirectiveKind"
+        },
+        "place": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Named place from SceneSnapshot"
+        },
+        "target": {
+          "enum": [
+            "user",
+            "place",
+            "device",
+            null
+          ]
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "emotion": {
+          "enum": [
+            "neutral",
+            "confused",
+            "happy",
+            "concerned",
+            "thinking",
+            null
+          ]
+        }
       }
     },
-
     "ClientMessage": {
       "type": "object",
-      "required": ["type"],
-      "properties": { "type": { "enum": ["hello", "userUtterance", "sceneUpdate", "deviceStates", "toolResult", "ping"] } },
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "hello",
+            "userUtterance",
+            "sceneUpdate",
+            "deviceStates",
+            "toolResult",
+            "confirmationResult",
+            "ping"
+          ]
+        }
+      },
       "oneOf": [
         {
           "properties": {
-            "type": { "const": "hello" },
-            "protocolVersion": { "$ref": "#/definitions/ProtocolVersion" },
-            "client": { "type": "string" }
+            "type": {
+              "const": "hello"
+            },
+            "protocolVersion": {
+              "$ref": "#/definitions/ProtocolVersion"
+            },
+            "client": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Session to resume, as returned by a previous ready. Absent means a new session."
+            }
           },
-          "required": ["protocolVersion", "client"]
+          "required": [
+            "protocolVersion",
+            "client"
+          ]
         },
         {
           "properties": {
-            "type": { "const": "userUtterance" },
-            "id": { "type": "string" },
-            "text": { "type": "string" }
+            "type": {
+              "const": "userUtterance"
+            },
+            "id": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "isFinal": {
+              "type": "boolean",
+              "description": "False for a partial speech transcript. Absent means true."
+            }
           },
-          "required": ["id", "text"]
+          "required": [
+            "id",
+            "text"
+          ]
         },
         {
           "properties": {
-            "type": { "const": "sceneUpdate" },
-            "scene": { "$ref": "#/definitions/SceneSnapshot" }
+            "type": {
+              "const": "sceneUpdate"
+            },
+            "scene": {
+              "$ref": "#/definitions/SceneSnapshot"
+            }
           },
-          "required": ["scene"]
+          "required": [
+            "scene"
+          ]
         },
         {
           "properties": {
-            "type": { "const": "deviceStates" },
-            "devices": { "type": "array", "items": { "$ref": "#/definitions/Device" } }
+            "type": {
+              "const": "deviceStates"
+            },
+            "devices": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Device"
+              }
+            }
           },
-          "required": ["devices"]
+          "required": [
+            "devices"
+          ]
         },
         {
           "properties": {
-            "type": { "const": "toolResult" },
-            "callId": { "type": "string" },
-            "ok": { "type": "boolean" },
-            "payload": { "type": "object", "additionalProperties": true },
-            "error": { "type": ["string", "null"] }
+            "type": {
+              "const": "toolResult"
+            },
+            "callId": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "payload": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           },
-          "required": ["callId", "ok"]
+          "required": [
+            "callId",
+            "ok"
+          ]
         },
-        { "properties": { "type": { "const": "ping" } } }
+        {
+          "properties": {
+            "type": {
+              "const": "confirmationResult"
+            },
+            "callId": {
+              "type": "string"
+            },
+            "approved": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "callId",
+            "approved"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "ping"
+            }
+          }
+        }
       ]
     },
-
     "ServerEvent": {
       "type": "object",
-      "required": ["type"],
-      "properties": { "type": { "enum": ["ready", "token", "utteranceEnd", "characterDirective", "toolCall", "error", "pong"] } },
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "ready",
+            "token",
+            "utteranceEnd",
+            "characterDirective",
+            "toolCall",
+            "homeDevices",
+            "ambientEvent",
+            "requestPlace",
+            "error",
+            "pong"
+          ]
+        }
+      },
       "oneOf": [
         {
           "properties": {
-            "type": { "const": "ready" },
-            "sessionId": { "type": "string" },
-            "protocolVersion": { "$ref": "#/definitions/ProtocolVersion" },
-            "model": { "type": "string" }
+            "type": {
+              "const": "ready"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "protocolVersion": {
+              "$ref": "#/definitions/ProtocolVersion"
+            },
+            "model": {
+              "type": "string"
+            },
+            "capabilities": {
+              "$ref": "#/definitions/Capabilities"
+            },
+            "resumed": {
+              "type": "boolean",
+              "description": "True when sessionId named an existing session. Picking up mid-thought and greeting again are different behaviours."
+            }
           },
-          "required": ["sessionId", "protocolVersion", "model"]
+          "required": [
+            "sessionId",
+            "protocolVersion",
+            "model",
+            "capabilities",
+            "resumed"
+          ]
         },
         {
           "properties": {
-            "type": { "const": "token" },
-            "utteranceId": { "type": "string" },
-            "text": { "type": "string" }
+            "type": {
+              "const": "token"
+            },
+            "utteranceId": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
           },
-          "required": ["utteranceId", "text"]
+          "required": [
+            "utteranceId",
+            "text"
+          ]
         },
         {
           "properties": {
-            "type": { "const": "utteranceEnd" },
-            "utteranceId": { "type": "string" }
+            "type": {
+              "const": "utteranceEnd"
+            },
+            "utteranceId": {
+              "type": "string"
+            }
           },
-          "required": ["utteranceId"]
+          "required": [
+            "utteranceId"
+          ]
         },
         {
           "properties": {
-            "type": { "const": "characterDirective" },
-            "directive": { "$ref": "#/definitions/CharacterDirective" }
+            "type": {
+              "const": "characterDirective"
+            },
+            "directive": {
+              "$ref": "#/definitions/CharacterDirective"
+            }
           },
-          "required": ["directive"]
+          "required": [
+            "directive"
+          ]
         },
         {
           "properties": {
-            "type": { "const": "toolCall" },
-            "callId": { "type": "string" },
-            "name": { "type": "string" },
-            "args": { "type": "object", "additionalProperties": true },
-            "safety": { "$ref": "#/definitions/Safety" }
+            "type": {
+              "const": "toolCall"
+            },
+            "callId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "safety": {
+              "$ref": "#/definitions/Safety"
+            },
+            "executedBy": {
+              "enum": [
+                "client",
+                "server"
+              ],
+              "description": "server means the client only approves; it must not claim to have acted."
+            }
           },
-          "required": ["callId", "name", "safety"]
+          "required": [
+            "callId",
+            "name",
+            "safety"
+          ]
         },
         {
           "properties": {
-            "type": { "const": "error" },
-            "code": { "type": "string" },
-            "message": { "type": "string" }
+            "type": {
+              "const": "homeDevices"
+            },
+            "devices": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Device"
+              }
+            }
           },
-          "required": ["code", "message"]
+          "required": [
+            "devices"
+          ],
+          "description": "The server's own device list, sent when the server owns execution and the client therefore has no home of its own to read."
         },
-        { "properties": { "type": { "const": "pong" } } }
+        {
+          "properties": {
+            "type": {
+              "const": "ambientEvent"
+            },
+            "source": {
+              "type": "string",
+              "description": "deviceId"
+            },
+            "kind": {
+              "$ref": "#/definitions/AmbientKind"
+            },
+            "interrupt": {
+              "$ref": "#/definitions/AmbientInterrupt"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "kind",
+            "interrupt",
+            "text"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "requestPlace"
+            },
+            "name": {
+              "type": "string",
+              "description": "The place the agent needs and does not have."
+            },
+            "prompt": {
+              "type": "string",
+              "description": "What the character says while asking."
+            }
+          },
+          "required": [
+            "name",
+            "prompt"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "error"
+            },
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "pong"
+            }
+          }
+        }
+      ]
+    },
+    "Capabilities": {
+      "description": "What this server can actually do. The client reads it instead of discovering by failure.",
+      "type": "object",
+      "required": [
+        "ambientEvents",
+        "toolExecution",
+        "requestPlace",
+        "speechInput",
+        "idleTimeoutSeconds"
+      ],
+      "properties": {
+        "ambientEvents": {
+          "type": "boolean"
+        },
+        "toolExecution": {
+          "enum": [
+            "client",
+            "server"
+          ],
+          "description": "Who fulfils an approved toolCall."
+        },
+        "requestPlace": {
+          "type": "boolean"
+        },
+        "speechInput": {
+          "type": "boolean"
+        },
+        "idleTimeoutSeconds": {
+          "type": "number",
+          "minimum": 1,
+          "description": "Client keepalive interval upper bound; send ping inside it."
+        }
+      }
+    },
+    "AmbientKind": {
+      "enum": [
+        "doorbell",
+        "finished",
+        "sensor",
+        "stateChange"
+      ]
+    },
+    "AmbientInterrupt": {
+      "description": "Server-asserted and coarse. The client owns rendering, not urgency inference.",
+      "enum": [
+        "now",
+        "passing",
+        "silent"
       ]
     }
   }

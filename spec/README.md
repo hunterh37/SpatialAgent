@@ -11,6 +11,8 @@ implement from. Product intent lives in `/PRD.md`; system design lives in
 | `03-protocol.md` | Wire messages between headset and `agentd` |
 | `04-home.md` | Device model, tool surface, safety classification |
 | `05-scene.md` | ARKit anchors, navmesh, named places, placement rules |
+| `06-avatar.md` | The bird: primitive rig, face, hop locomotion, expressions (supersedes 01 for body) |
+| `07-memory.md` | Semantic map, teaching acts, rule enforcement, curiosity, learned behavior |
 
 Changing a spec is a PR. If an implementation disagrees with a spec, one of the two is a bug
 and the PR says which.

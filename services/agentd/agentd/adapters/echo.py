@@ -22,7 +22,10 @@ class EchoAdapter:
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[Chunk]:
         if self._scripted is not None:
-            for chunk in self._scripted:
+            # One-shot. A second round (after a tool result) gets nothing further to say,
+            # which is what ends the loop rather than replaying the same tool call forever.
+            scripted, self._scripted = self._scripted, []
+            for chunk in scripted:
                 if self._delay:
                     await asyncio.sleep(self._delay)
                 yield chunk

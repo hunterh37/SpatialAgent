@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "facts": [
+    { "id": "seed000001", "text": "goes by Hunter", "slot": "identity", "source": "seed", "confidence": 1.0, "question": "name" },
+    { "id": "seed000002", "text": "builds spatial apps for Vision Pro", "slot": "identity", "source": "seed", "confidence": 1.0, "question": "work" },
+    { "id": "seed000003", "text": "starts the day around 7, standup at 9:30", "slot": "routine", "source": "seed", "confidence": 1.0, "question": "wake" },
+    { "id": "seed000004", "text": "drinks oat flat whites, no sugar", "slot": "diet", "source": "seed", "confidence": 1.0, "question": "drink" },
+    { "id": "seed000005", "text": "does not eat shellfish", "slot": "diet", "source": "seed", "confidence": 1.0, "question": "food_avoid" },
+    { "id": "seed000006", "text": "wants quiet between 9:30 and 11, that is deep work", "slot": "boundary", "source": "seed", "confidence": 1.0, "question": "focus" },
+    { "id": "seed000007", "text": "has a cat called Pixel who sleeps on the couch", "slot": "people", "source": "seed", "confidence": 1.0, "question": "pets" },
+    { "id": "seed000008", "text": "likes the lights warm and low after dark", "slot": "preference", "source": "seed", "confidence": 1.0, "question": "lighting" },
+    { "id": "seed000009", "text": "runs standup at the desk every weekday morning", "slot": "place_meaning", "place": "desk", "source": "seed", "confidence": 1.0, "question": "place:desk:use" },
+    { "id": "seed000010", "text": "the monstera by the couch is not to be landed on", "slot": "boundary", "place": "couch", "source": "seed", "confidence": 1.0, "question": "place:couch:care" }
+  ],
+  "asked": {}
+}

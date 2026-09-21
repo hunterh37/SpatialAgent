@@ -19,7 +19,7 @@ class Scenario:
     devices: list[Device]
 
     @classmethod
-    def load(cls, ref: str) -> "Scenario":
+    def load(cls, ref: str) -> Scenario:
         path = Path(ref)
         if not path.exists():
             path = SCENARIO_DIR / (ref if ref.endswith(".yaml") else f"{ref}.yaml")

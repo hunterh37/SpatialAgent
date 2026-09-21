@@ -1,0 +1,249 @@
+{
+  "clientMessages": [
+    {
+      "client": "visionOS 2.0",
+      "protocolVersion": 1,
+      "sessionId": null,
+      "type": "hello"
+    },
+    {
+      "client": "visionOS 2.0",
+      "protocolVersion": 1,
+      "sessionId": "s-resume",
+      "type": "hello"
+    },
+    {
+      "id": "u1",
+      "isFinal": true,
+      "text": "turn off the kitchen lights",
+      "type": "userUtterance"
+    },
+    {
+      "id": "u2",
+      "isFinal": false,
+      "text": "turn off the",
+      "type": "userUtterance"
+    },
+    {
+      "scene": {
+        "activities": [],
+        "floorArea": 46.0,
+        "objects": [
+          {
+            "deviceId": "dev-1",
+            "name": "coffee machine",
+            "place": "kitchen"
+          }
+        ],
+        "places": [
+          {
+            "kind": "generic",
+            "name": "kitchen",
+            "navigable": true
+          }
+        ],
+        "rules": [
+          {
+            "kind": "forbidden",
+            "name": "the shrine",
+            "place": null,
+            "severity": "hard"
+          }
+        ],
+        "userPlace": "kitchen"
+      },
+      "type": "sceneUpdate"
+    },
+    {
+      "devices": [
+        {
+          "capabilities": [
+            "on_off",
+            "brightness"
+          ],
+          "id": "light.kitchen",
+          "kind": "light",
+          "name": "Kitchen Lights",
+          "room": "kitchen",
+          "state": {
+            "brightness": 80,
+            "on": true
+          }
+        }
+      ],
+      "type": "deviceStates"
+    },
+    {
+      "callId": "c1",
+      "error": null,
+      "ok": true,
+      "payload": {
+        "id": "light.kitchen",
+        "state": {
+          "on": false
+        }
+      },
+      "type": "toolResult"
+    },
+    {
+      "callId": "c2",
+      "error": "user_cancelled",
+      "ok": false,
+      "payload": {},
+      "type": "toolResult"
+    },
+    {
+      "approved": true,
+      "callId": "c3",
+      "type": "confirmationResult"
+    },
+    {
+      "type": "ping"
+    }
+  ],
+  "serverEvents": [
+    {
+      "capabilities": {
+        "ambientEvents": true,
+        "idleTimeoutSeconds": 30.0,
+        "requestPlace": true,
+        "speechInput": false,
+        "toolExecution": "server"
+      },
+      "model": "ollama/llama3.2:3b",
+      "protocolVersion": 1,
+      "resumed": true,
+      "sessionId": "s1",
+      "type": "ready"
+    },
+    {
+      "text": "Heading ",
+      "type": "token",
+      "utteranceId": "u1"
+    },
+    {
+      "type": "utteranceEnd",
+      "utteranceId": "u1"
+    },
+    {
+      "directive": {
+        "deviceId": null,
+        "emotion": null,
+        "kind": "walkTo",
+        "place": "kitchen",
+        "target": "place"
+      },
+      "type": "characterDirective"
+    },
+    {
+      "directive": {
+        "deviceId": null,
+        "emotion": null,
+        "kind": "lookAt",
+        "place": null,
+        "target": "user"
+      },
+      "type": "characterDirective"
+    },
+    {
+      "directive": {
+        "deviceId": null,
+        "emotion": "thinking",
+        "kind": "emote",
+        "place": null,
+        "target": null
+      },
+      "type": "characterDirective"
+    },
+    {
+      "directive": {
+        "deviceId": "light.kitchen",
+        "emotion": null,
+        "kind": "point",
+        "place": null,
+        "target": "device"
+      },
+      "type": "characterDirective"
+    },
+    {
+      "directive": {
+        "deviceId": null,
+        "emotion": null,
+        "kind": "gesture",
+        "place": null,
+        "target": null
+      },
+      "type": "characterDirective"
+    },
+    {
+      "directive": {
+        "deviceId": null,
+        "emotion": null,
+        "kind": "idle",
+        "place": null,
+        "target": null
+      },
+      "type": "characterDirective"
+    },
+    {
+      "args": {
+        "device_id": "light.kitchen",
+        "on": false
+      },
+      "callId": "c1",
+      "executedBy": "client",
+      "name": "set_light",
+      "safety": "safe",
+      "type": "toolCall"
+    },
+    {
+      "args": {
+        "locked": false
+      },
+      "callId": "c2",
+      "executedBy": "server",
+      "name": "set_lock",
+      "safety": "unsafe",
+      "type": "toolCall"
+    },
+    {
+      "devices": [
+        {
+          "capabilities": [
+            "on_off",
+            "brightness"
+          ],
+          "id": "light.kitchen",
+          "kind": "light",
+          "name": "Kitchen Lights",
+          "room": "kitchen",
+          "state": {
+            "brightness": 80,
+            "on": true
+          }
+        }
+      ],
+      "type": "homeDevices"
+    },
+    {
+      "interrupt": "now",
+      "kind": "doorbell",
+      "source": "sensor.doorbell",
+      "text": "Someone is at the door.",
+      "type": "ambientEvent"
+    },
+    {
+      "name": "kitchen",
+      "prompt": "Where's the kitchen?",
+      "type": "requestPlace"
+    },
+    {
+      "code": "agent_error",
+      "message": "the model went away",
+      "type": "error"
+    },
+    {
+      "type": "pong"
+    }
+  ]
+}

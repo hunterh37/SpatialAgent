@@ -4,9 +4,13 @@ import json
 
 from fastapi.testclient import TestClient
 
+from agentd.adapters.base import Chunk
 from agentd.adapters.echo import EchoAdapter
+from agentd.executors import ServerExecutor
 from agentd.protocol import PROTOCOL_VERSION
 from agentd.server import create_app
+from mocks.mock_home import MockHome
+from mocks.scenario import Scenario
 
 
 def _client() -> TestClient:
@@ -58,3 +62,216 @@ def test_full_utterance_round_trip() -> None:
                 break
         assert "token" in kinds
         assert "utteranceEnd" in kinds
+
+
+def _hello(ws, session_id: str | None = None) -> dict:
+    payload = {"type": "hello", "protocolVersion": PROTOCOL_VERSION, "client": "test"}
+    if session_id:
+        payload["sessionId"] = session_id
+    ws.send_text(json.dumps(payload))
+    return ws.receive_json()
+
+
+def _drain_until(ws, kind: str, limit: int = 40) -> list[dict]:
+    events = []
+    for _ in range(limit):
+        event = ws.receive_json()
+        events.append(event)
+        if event["type"] == kind:
+            return events
+    raise AssertionError(f"never saw {kind}: {[e['type'] for e in events]}")
+
+
+def test_ready_states_capabilities() -> None:
+    with _client().websocket_connect("/agent") as ws:
+        caps = _hello(ws)["capabilities"]
+        assert caps["toolExecution"] in {"client", "server"}
+        assert caps["ambientEvents"] is True
+        assert caps["idleTimeoutSeconds"] > 0
+
+
+def test_reconnect_resumes_the_same_session() -> None:
+    app = create_app(EchoAdapter())
+    client = TestClient(app)
+
+    with client.websocket_connect("/agent") as ws:
+        ready = _hello(ws)
+        session_id = ready["sessionId"]
+        assert ready["resumed"] is False
+        ws.send_text(json.dumps({"type": "userUtterance", "id": "u1", "text": "remember pears"}))
+        _drain_until(ws, "utteranceEnd")
+
+    # Sleep/wake: a new socket, the same conversation.
+    with client.websocket_connect("/agent") as ws:
+        ready = _hello(ws, session_id)
+        assert ready["resumed"] is True
+        assert ready["sessionId"] == session_id
+
+    session = app.state.sessions.get(session_id)
+    assert any(m["content"] == "remember pears" for m in session.history)
+
+
+def test_unknown_session_id_starts_a_new_session() -> None:
+    with _client().websocket_connect("/agent") as ws:
+        assert _hello(ws, "nosuchsession")["resumed"] is False
+
+
+def test_ping_works_before_hello() -> None:
+    with _client().websocket_connect("/agent") as ws:
+        ws.send_text(json.dumps({"type": "ping"}))
+        assert ws.receive_json()["type"] == "pong"
+
+
+def test_conversation_requires_hello() -> None:
+    with _client().websocket_connect("/agent") as ws:
+        ws.send_text(json.dumps({"type": "userUtterance", "id": "u1", "text": "hi"}))
+        assert ws.receive_json()["code"] == "hello_required"
+
+
+def test_device_change_pushes_an_ambient_event() -> None:
+    scenario = Scenario.load("apartment")
+    with _client().websocket_connect("/agent") as ws:
+        _hello(ws)
+        ws.send_text(json.dumps(
+            {"type": "deviceStates", "devices": [d.model_dump() for d in scenario.devices]}
+        ))
+
+        after = [d.model_copy(deep=True) for d in scenario.devices]
+        next(d for d in after if d.id == "sensor.doorbell").state["ringing"] = True
+        ws.send_text(json.dumps(
+            {"type": "deviceStates", "devices": [d.model_dump() for d in after]}
+        ))
+
+        event = ws.receive_json()
+        assert event["type"] == "ambientEvent"
+        assert event["kind"] == "doorbell"
+        assert event["interrupt"] == "now"
+
+
+def test_tool_call_is_fulfilled_by_the_client() -> None:
+    adapter = EchoAdapter(scripted=[
+        Chunk(tool_calls=[{"function": {"name": "set_light", "arguments": {
+            "device_id": "light.desk", "on": True}}}]),
+        Chunk(done=True),
+    ])
+    with TestClient(create_app(adapter)).websocket_connect("/agent") as ws:
+        _hello(ws)
+        ws.send_text(json.dumps({"type": "userUtterance", "id": "u1", "text": "desk lamp on"}))
+
+        call = _drain_until(ws, "toolCall")[-1]
+        assert call["executedBy"] == "client"
+        ws.send_text(json.dumps({
+            "type": "toolResult", "callId": call["callId"], "ok": True,
+            "payload": {"id": "light.desk", "state": {"on": True}},
+        }))
+        _drain_until(ws, "utteranceEnd")
+
+
+def test_server_side_execution_takes_only_a_confirmation() -> None:
+    home = MockHome(Scenario.load("apartment").devices)
+    adapter = EchoAdapter(scripted=[
+        Chunk(tool_calls=[{"function": {"name": "set_lock", "arguments": {
+            "device_id": "lock.front", "locked": False}}}]),
+        Chunk(done=True),
+    ])
+    app = create_app(adapter, ServerExecutor(home, timeout=5.0))
+    with TestClient(app).websocket_connect("/agent") as ws:
+        _hello(ws)
+        ws.send_text(json.dumps({"type": "userUtterance", "id": "u1", "text": "unlock the door"}))
+
+        call = _drain_until(ws, "toolCall")[-1]
+        assert call["executedBy"] == "server"
+        assert call["safety"] == "unsafe"
+        assert home.devices["lock.front"].state["locked"] is True  # not yet
+
+        ws.send_text(json.dumps({
+            "type": "confirmationResult", "callId": call["callId"], "approved": True,
+        }))
+        _drain_until(ws, "utteranceEnd")
+        assert home.devices["lock.front"].state["locked"] is False
+
+
+def test_server_owned_home_is_pushed_to_the_client() -> None:
+    """HomeKit is absent on visionOS, so a server-executing setup has to say what it holds."""
+    home = MockHome(Scenario.load("apartment").devices)
+    app = create_app(EchoAdapter(), ServerExecutor(home))
+    with TestClient(app).websocket_connect("/agent") as ws:
+        ready = _hello(ws)
+        assert ready["capabilities"]["toolExecution"] == "server"
+
+        event = ws.receive_json()
+        assert event["type"] == "homeDevices"
+        assert {d["id"] for d in event["devices"]} == {
+            "light.kitchen", "light.desk", "lock.front", "sensor.doorbell"
+        }
+
+
+def test_client_owned_home_is_not_pushed() -> None:
+    with _client().websocket_connect("/agent") as ws:
+        assert _hello(ws)["capabilities"]["toolExecution"] == "client"
+        ws.send_text(json.dumps({"type": "ping"}))
+        # Nothing between ready and pong: the client's own devices are the source.
+        assert ws.receive_json()["type"] == "pong"
+
+
+def test_server_owned_devices_reach_the_prompt() -> None:
+    home = MockHome(Scenario.load("apartment").devices)
+    app = create_app(EchoAdapter(), ServerExecutor(home))
+    with TestClient(app).websocket_connect("/agent") as ws:
+        session_id = _hello(ws)["sessionId"]
+        ws.receive_json()
+
+    from agentd.prompt import build_system_prompt
+
+    session = app.state.sessions.get(session_id)
+    assert "light.kitchen" in build_system_prompt(session.scene, session.devices)
+
+
+def test_an_empty_client_snapshot_does_not_wipe_a_server_owned_home() -> None:
+    """visionOS has no HomeKit, so the app sends `devices: []`. Believing it left the model
+    with nothing to control."""
+    home = MockHome(Scenario.load("apartment").devices)
+    app = create_app(EchoAdapter(), ServerExecutor(home))
+    with TestClient(app).websocket_connect("/agent") as ws:
+        session_id = _hello(ws)["sessionId"]
+        ws.receive_json()  # homeDevices
+        ws.send_text(json.dumps({"type": "deviceStates", "devices": []}))
+        ws.send_text(json.dumps({"type": "ping"}))
+        assert ws.receive_json()["type"] == "pong"
+
+    session = app.state.sessions.get(session_id)
+    assert [d.id for d in session.devices] == [
+        "light.kitchen", "light.desk", "lock.front", "sensor.doorbell"
+    ]
+
+
+# --- memory over HTTP -------------------------------------------------------
+# The profile is only "owned by the user" if it is reachable without the model in the way.
+
+
+def test_memory_can_be_listed_added_edited_and_deleted():
+    from fastapi.testclient import TestClient
+
+    from agentd.adapters import EchoAdapter
+    from agentd.server import create_app
+
+    client = TestClient(create_app(EchoAdapter(delay=0.0)))
+
+    added = client.post("/memory", json={"text": "drinks oat milk", "slot": "diet"}).json()
+    assert added["ok"]
+    fact_id = added["fact"]["id"]
+
+    assert any(f["id"] == fact_id for f in client.get("/memory").json()["facts"])
+    assert client.patch(f"/memory/{fact_id}", json={"text": "drinks soy milk"}).json()["ok"]
+    assert client.get("/memory", params={"q": "soy"}).json()["facts"][0]["text"] == (
+        "drinks soy milk"
+    )
+
+    exported = client.get("/memory/export").json()
+    assert exported["schema"] == 1
+
+    assert client.delete(f"/memory/{fact_id}").json()["ok"]
+    assert client.get("/memory").json()["count"] == 0
+
+    # Portability: the export puts it back.
+    assert client.post("/memory/import", json=exported).json()["added"] == 1

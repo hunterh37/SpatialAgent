@@ -1,0 +1,95 @@
+# The hackathon demo room: a one-room loft whose landmarks are already placed, so the demo
+# opens on a bird that already knows where it lives. Mirrors the landmark presets the
+# headset's LandmarkSetupView writes, including the perch, so a run here and a run in the
+# headset tell the same story.
+name: demo_loft
+scene:
+  floorArea: 38.0
+  userPosition: { x: 0.0, y: 0.0, z: 0.0 }
+  places:
+    # The three perches, named by colour exactly as the headset's presets name them. They
+    # are interchangeable to the model; which one the bird uses is the headset's learned
+    # choice, so the server is told all three and picks none.
+    - name: the red perch
+      kind: perch
+      position: { x: -2.2, y: 1.0, z: -1.1 }
+      radius: 0.3
+    - name: the blue perch
+      kind: perch
+      position: { x: -1.4, y: 1.0, z: -1.4 }
+      radius: 0.3
+    - name: the amber perch
+      kind: perch
+      position: { x: -0.5, y: 1.0, z: -1.5 }
+      radius: 0.3
+    - name: desk
+      kind: workspace
+      position: { x: -1.6, y: 0.0, z: -2.2 }
+      radius: 0.7
+    - name: kitchen
+      position: { x: 2.4, y: 0.0, z: -1.8 }
+      radius: 0.9
+    - name: couch
+      kind: surface
+      position: { x: 0.2, y: 0.0, z: 1.4 }
+      radius: 0.8
+    - name: front door
+      position: { x: -3.1, y: 0.0, z: 0.4 }
+      radius: 0.5
+    - name: record player
+      kind: surface
+      position: { x: 1.4, y: 0.8, z: 1.9 }
+      radius: 0.3
+  objects:
+    - name: the monstera
+      place: couch
+    - name: the espresso machine
+      deviceId: light.kitchen
+      place: kitchen
+  rules:
+    # A fragile rule the bird has to route around: the demo's proof that a taught constraint
+    # outlives the sentence that taught it.
+    - kind: fragile
+      severity: hard
+      name: the monstera
+      place: couch
+    - kind: perch
+      severity: soft
+      name: the red perch
+      place: the red perch
+  activities:
+    - name: morning standup
+      place: desk
+    - name: winding down
+      place: couch
+devices:
+  - id: light.desk
+    name: Desk Lamp
+    room: desk
+    kind: light
+    state: { "on": false, brightness: 0 }
+    capabilities: [on_off, brightness]
+  - id: light.kitchen
+    name: Kitchen Lights
+    room: kitchen
+    kind: light
+    state: { "on": true, brightness: 80 }
+    capabilities: [on_off, brightness]
+  - id: light.couch
+    name: Floor Lamp
+    room: couch
+    kind: light
+    state: { "on": false, brightness: 0 }
+    capabilities: [on_off, brightness]
+  - id: lock.front
+    name: Front Door
+    room: front door
+    kind: lock
+    state: { locked: true }
+    capabilities: [lock_unlock]
+  - id: sensor.doorbell
+    name: Doorbell
+    room: front door
+    kind: sensor
+    state: { ringing: false }
+    capabilities: [motion]
